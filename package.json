@@ -1,0 +1,18 @@
+{
+  "name": "yyt1771-af-web-station",
+  "version": "0.1.0",
+  "private": true,
+  "description": "YY/T 1771-style AF visual support station",
+  "scripts": {
+    "backend:dev": "python -m uvicorn yyt1771_af.main:app --reload",
+    "backend:test": "python -m pytest",
+    "backend:lint": "python -m ruff check backend",
+    "backend:format:check": "python -m ruff format --check backend",
+    "frontend:dev": "npm --prefix frontend run dev",
+    "frontend:build": "npm --prefix frontend run build",
+    "frontend:test": "npm --prefix frontend run test",
+    "frontend:lint": "npm --prefix frontend run lint",
+    "test": "npm run backend:test && npm run frontend:test",
+    "lint": "npm run backend:lint && npm run backend:format:check && npm run frontend:lint"
+  }
+}

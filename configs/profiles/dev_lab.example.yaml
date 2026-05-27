@@ -1,0 +1,56 @@
+profile_name: dev_lab
+mode: development
+
+camera:
+  type: hik_mvs
+  # Machine-specific values belong in configs/local/*.yaml, not in committed files.
+  serial_number: "REPLACE_WITH_CAMERA_SERIAL"
+  sdk_path: null
+  pixel_format: mono8
+  frame_width: 2048
+  frame_height: 1364
+  frame_rate_hz: 10
+  exposure_us: null
+  gain: null
+  device_roi:
+    x: 0
+    y: 0
+    width: 2048
+    height: 1364
+
+runtime:
+  run_output_dir: runs
+  log_level: info
+
+frontend:
+  preview_max_width: 1024
+  preview_max_height: 682
+
+temperature_controller:
+  type: serial_ascii
+  enabled: true
+  port: "REPLACE_WITH_LOCAL_SERIAL_PORT"
+  baud_rate: 9600
+  bytesize: 8
+  parity: N
+  stopbits: 1
+  timeout_s: 1.0
+  write_timeout_s: 1.0
+  poll_interval_s: 0.5
+  protocol: configured_ascii
+  command_set:
+    read_current_temperature: null
+    read_target_temperature: null
+    set_target_temperature: null
+    read_power_percent: null
+    set_power_percent: null
+    set_output_enabled: null
+  parsing:
+    temperature_regex: null
+    power_regex: null
+  safety:
+    output_enabled_on_connect: false
+    min_target_temperature_c: -20.0
+    max_target_temperature_c: 100.0
+    min_power_percent: 0.0
+    max_power_percent: 100.0

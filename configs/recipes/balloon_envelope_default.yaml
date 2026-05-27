@@ -1,0 +1,21 @@
+name: balloon_envelope_default
+target_family: balloon_envelope
+
+segmentation:
+  polarity: auto
+  threshold_mode: otsu
+  threshold_value: null
+  blur_kernel: 3
+  close_kernel: 11
+  open_kernel: 3
+  min_component_area_px: 500
+
+detector:
+  detector_kind: balloon_envelope_detector
+  min_quality: 0.65
+  reject_contact_on_roi_boundary: true
+  boundary_margin_px: 4.0
+  max_point_jump_px: 25.0
+  ignore_internal_texture: true
+  fill_internal_holes: true
+  bridge_mesh_gaps: true

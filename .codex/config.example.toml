@@ -1,0 +1,10 @@
+# Optional Codex configuration example.
+# Copy to .codex/config.toml only if you want repo-local Codex defaults.
+
+# Keep approval and sandbox settings conservative at first.
+# Edit according to your local Codex setup.
+
+# Example only:
+# model = "gpt-5-codex"
+# approval_policy = "on-request"
+# sandbox_mode = "workspace-write"

@@ -1,0 +1,65 @@
+- generic [ref=e2]:
+  - navigation "Application sections" [ref=e3]:
+    - button "Setup" [pressed] [ref=e4] [cursor=pointer]
+    - button "Run" [ref=e5] [cursor=pointer]
+    - button "Analysis" [ref=e6] [cursor=pointer]
+  - main [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9]:
+        - heading "YYT1771 AF Web Station" [level=1] [ref=e10]
+        - paragraph [ref=e11]: Setup
+      - generic [ref=e12]: source closed
+    - region "Setup workspace" [ref=e13]:
+      - region "Frame preview" [ref=e14]:
+        - img "No frozen frame" [ref=e15]:
+          - generic [ref=e16]: No frozen frame
+      - complementary "Setup controls" [ref=e17]:
+        - generic [ref=e18]:
+          - heading "Source" [level=2] [ref=e19]
+          - generic [ref=e20]:
+            - button "Open mock source" [ref=e21] [cursor=pointer]
+            - button "Freeze latest frame" [disabled] [ref=e22]
+        - generic [ref=e23]:
+          - heading "Target" [level=2] [ref=e24]
+          - group "Target family" [ref=e25]:
+            - button "Balloon envelope" [pressed] [ref=e26] [cursor=pointer]
+            - button "Wire strip" [ref=e27] [cursor=pointer]
+        - generic [ref=e28]:
+          - heading "ROI" [level=2] [ref=e29]
+          - generic [ref=e30]:
+            - generic [ref=e31]:
+              - generic [ref=e32]: Center X
+              - spinbutton "Center X" [ref=e33]: "110"
+            - generic [ref=e34]:
+              - generic [ref=e35]: Center Y
+              - spinbutton "Center Y" [ref=e36]: "110"
+            - generic [ref=e37]:
+              - generic [ref=e38]: Width
+              - spinbutton "Width" [ref=e39]: "130"
+            - generic [ref=e40]:
+              - generic [ref=e41]: Height
+              - spinbutton "Height" [ref=e42]: "80"
+            - generic [ref=e43]:
+              - generic [ref=e44]: Angle
+              - spinbutton "Angle" [ref=e45]: "0"
+        - generic [ref=e46]:
+          - heading "Result" [level=2] [ref=e47]
+          - generic [ref=e48]:
+            - generic [ref=e49]:
+              - term [ref=e50]: Source
+              - definition [ref=e51]: closed
+            - generic [ref=e52]:
+              - term [ref=e53]: Status
+              - definition [ref=e54]: waiting
+            - generic [ref=e55]:
+              - term [ref=e56]: Quality
+              - definition [ref=e57]: "-"
+            - generic [ref=e58]:
+              - term [ref=e59]: Distance
+              - definition [ref=e60]: "-"
+            - generic [ref=e61]:
+              - term [ref=e62]: Detector
+              - definition [ref=e63]: "-"
+        - generic [ref=e64]:
+          - button "Confirm setup" [disabled] [ref=e65]
+          - button "Run detection" [disabled] [ref=e66]

@@ -1,0 +1,21 @@
+name: wire_strip_default
+target_family: wire_strip
+
+segmentation:
+  polarity: auto
+  threshold_mode: adaptive
+  threshold_value: null
+  blur_kernel: 3
+  close_kernel: 5
+  open_kernel: 3
+  min_component_area_px: 80
+
+detector:
+  detector_kind: wire_strip_detector
+  min_quality: 0.6
+  reject_contact_on_roi_boundary: true
+  boundary_margin_px: 3.0
+  max_point_jump_px: 20.0
+  require_physical_endpoints: false
+  skeleton_endpoint_detection: false
+  preserve_visible_strip_contour: true

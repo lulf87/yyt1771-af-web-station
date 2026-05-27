@@ -1,0 +1,24 @@
+profile_name: dev_offline
+mode: development
+
+camera:
+  type: offline_folder
+  # Override with a local ignored config or environment variable.
+  image_folder: ./sample_data/offline_frames
+  loop: true
+  frame_rate_hz: 10
+  pixel_format: mono8
+
+runtime:
+  run_output_dir: runs
+  log_level: info
+
+frontend:
+  preview_max_width: 1024
+  preview_max_height: 682
+
+temperature_controller:
+  type: file
+  enabled: false
+  temperature_file: ./sample_data/temperature_trace.csv
+  loop: false
