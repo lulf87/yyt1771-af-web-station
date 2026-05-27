@@ -1,5 +1,0 @@
-temperature_controller:
-  type: file
-  enabled: false
-  temperature_file: ./sample_data/temperature_trace.csv
-  loop: false
