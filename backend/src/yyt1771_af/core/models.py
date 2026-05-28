@@ -62,6 +62,9 @@ class Frame:
     height: int
     coordinate_space: CoordinateSpace
     image: np.ndarray
+    frame_name: str | None = None
+    frame_index: int | None = None
+    dtype: str | None = None
 
 
 class SegmentationParams(BaseModel):

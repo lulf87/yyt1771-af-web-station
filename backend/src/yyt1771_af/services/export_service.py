@@ -9,10 +9,10 @@ import struct
 import zipfile
 import zlib
 from dataclasses import dataclass
-from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 from xml.sax.saxutils import escape
 
+from yyt1771_af.core.path_redaction import sanitize_path_metadata
 from yyt1771_af.storage.run_store import RunArtifactStore, run_artifact_store
 
 CSV_COLUMNS = [
@@ -30,10 +30,6 @@ CSV_COLUMNS = [
 ]
 
 WINDOWS_INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\s]+')
-WINDOWS_ABSOLUTE_PATH = re.compile(r"^[A-Za-z]:[\\/].+")
-WINDOWS_UNC_PATH = re.compile(r"^\\\\[^\\]+\\[^\\]+\\?.*")
-POSIX_ABSOLUTE_PATH = re.compile(r"^/.+")
-PATH_KEY_PATTERN = re.compile(r"(^path$|_path$|path_|_file$|file_path$|temperature_file$)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,40 +179,7 @@ def _sanitize_export_artifacts(artifacts: dict[str, Any]) -> dict[str, Any]:
 
 
 def _sanitize_export_metadata(value: Any, *, key: str | None = None) -> Any:
-    if isinstance(value, dict):
-        return {
-            str(child_key): _sanitize_export_metadata(child_value, key=str(child_key))
-            for child_key, child_value in value.items()
-        }
-    if isinstance(value, list):
-        return [_sanitize_export_metadata(item, key=key) for item in value]
-    if isinstance(value, tuple):
-        return [_sanitize_export_metadata(item, key=key) for item in value]
-    if isinstance(value, str) and _should_redact_path(value, key):
-        return _safe_path_label(value)
-    return value
-
-
-def _should_redact_path(value: str, key: str | None) -> bool:
-    normalized_key = (key or "").lower()
-    return (
-        _path_key(normalized_key)
-        or bool(WINDOWS_ABSOLUTE_PATH.match(value))
-        or bool(WINDOWS_UNC_PATH.match(value))
-        or bool(POSIX_ABSOLUTE_PATH.match(value))
-    ) and _safe_path_label(value) != value
-
-
-def _path_key(key: str) -> bool:
-    return bool(PATH_KEY_PATTERN.search(key))
-
-
-def _safe_path_label(value: str) -> str:
-    if "\\" in value or WINDOWS_ABSOLUTE_PATH.match(value) or WINDOWS_UNC_PATH.match(value):
-        name = PureWindowsPath(value).name
-    else:
-        name = PurePosixPath(value).name
-    return name or "redacted_path"
+    return sanitize_path_metadata(value, key=key)
 
 
 def _png_chart(analysis: dict[str, Any] | None) -> bytes:

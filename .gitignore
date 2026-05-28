@@ -24,6 +24,7 @@ coverage/
 # Local machine config
 configs/local/*.yaml
 configs/local/*.yml
+configs/local/*.json
 .local/
 
 # Runtime output
@@ -31,6 +32,12 @@ runs/
 artifacts/
 logs/
 *.log
+local_data/
+camera_captures/
+sample_data/local/
+validation_results/
+offline_eval_results/
+*.npy
 
 # OS/editor
 .DS_Store

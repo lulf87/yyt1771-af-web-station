@@ -75,6 +75,7 @@ class SetupService:
         frame = self._camera.current_frame()
         frame_ref = self._camera.frame_ref(frame)
         self._frozen_frame_ref = frame_ref
+        self._camera.pin_frame(frame.frame_id)
         return FreezeResponse(
             frame_ref=frame_ref,
             preview_url=f"/api/camera/frame/{frame.frame_id}/preview.svg",

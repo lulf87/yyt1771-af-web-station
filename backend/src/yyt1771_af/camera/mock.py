@@ -34,6 +34,9 @@ class MockCameraSource:
             height=int(image.shape[0]),
             coordinate_space=CoordinateSpace.ACQUISITION,
             image=image,
+            frame_name=f"mock_{self._frame_counter:06d}",
+            frame_index=self._frame_counter - 1,
+            dtype=str(image.dtype),
         )
 
 

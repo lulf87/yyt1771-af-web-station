@@ -63,14 +63,22 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
     setCameraStatus(await getCameraStatus());
   }
 
-  async function handleOpen() {
-    await runAction("open", async () => {
-      await openCamera("dev_mock");
+  async function openSource(profile: "dev_mock" | "dev_offline") {
+    await runAction(`open-${profile}`, async () => {
+      await openCamera(profile);
       await refreshStatus();
       setFrameRef(null);
       setPreviewUrl(null);
       setDetection(null);
     });
+  }
+
+  async function handleOpenMock() {
+    await openSource("dev_mock");
+  }
+
+  async function handleOpenOffline() {
+    await openSource("dev_offline");
   }
 
   async function handleFreeze() {
@@ -154,8 +162,11 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
           <section className="panel-section">
             <h2>Source</h2>
             <div className="button-row compact">
-              <button disabled={isBusy} onClick={handleOpen} type="button">
+              <button disabled={isBusy} onClick={handleOpenMock} type="button">
                 Open mock source
+              </button>
+              <button disabled={isBusy} onClick={handleOpenOffline} type="button">
+                Open offline source
               </button>
               <button disabled={!hasOpenSource || isBusy} onClick={handleFreeze} type="button">
                 Freeze latest frame

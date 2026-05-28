@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -28,19 +29,21 @@ class CameraStatus(BaseModel):
 
 
 class CameraService:
-    def __init__(self) -> None:
+    def __init__(self, *, max_cached_frames: int = 4) -> None:
         self._source: CameraSource | None = None
         self._source_type = "none"
         self._latest_frame: Frame | None = None
-        self._frames: dict[int, Frame] = {}
+        self._frames: OrderedDict[int, Frame] = OrderedDict()
+        self._pinned_frame_ids: set[int] = set()
+        self._max_cached_frames = max(1, max_cached_frames)
 
     def open(self, profile: str) -> CameraOpenResult:
         self.close()
         self._source = self._source_for_profile(profile)
         self._source.open()
         self._source_type = getattr(self._source, "source_type", profile)
-        self._latest_frame = self._source.get_latest_frame()
-        self._frames[self._latest_frame.frame_id] = self._latest_frame
+        self._latest_frame = self._initial_frame(self._source)
+        self._cache_frame(self._latest_frame)
         return CameraOpenResult(opened=True, source_type=self._source_type)
 
     def close(self) -> None:
@@ -50,6 +53,7 @@ class CameraService:
         self._source_type = "none"
         self._latest_frame = None
         self._frames.clear()
+        self._pinned_frame_ids.clear()
 
     def status(self) -> CameraStatus:
         return CameraStatus(
@@ -65,7 +69,7 @@ class CameraService:
         if self._source is None:
             raise RuntimeError("camera source is not opened")
         self._latest_frame = self._source.get_latest_frame()
-        self._frames[self._latest_frame.frame_id] = self._latest_frame
+        self._cache_frame(self._latest_frame)
         return self._latest_frame
 
     def current_frame(self) -> Frame:
@@ -77,9 +81,20 @@ class CameraService:
         frame = self._frames.get(frame_ref.frame_id)
         if frame is None:
             raise KeyError(f"frame {frame_ref.frame_id} is not available")
+        self._frames.move_to_end(frame_ref.frame_id)
         if frame.width != frame_ref.width or frame.height != frame_ref.height:
             raise ValueError("frame geometry does not match requested frame reference")
         return frame
+
+    @property
+    def cached_frame_count(self) -> int:
+        return len(self._frames)
+
+    def pin_frame(self, frame_id: int) -> None:
+        if frame_id not in self._frames:
+            raise KeyError(f"frame {frame_id} is not available")
+        self._pinned_frame_ids = {frame_id}
+        self._trim_cache()
 
     def frame_ref(self, frame: Frame) -> FrameRef:
         return FrameRef(
@@ -103,8 +118,36 @@ class CameraService:
             folder_value = os.environ.get("YYT1771_AF_OFFLINE_DIR")
             if folder_value is None:
                 raise FileNotFoundError("YYT1771_AF_OFFLINE_DIR is required for dev_offline")
-            return OfflineFolderCameraSource(Path(folder_value))
+            return OfflineFolderCameraSource(
+                Path(folder_value),
+                loop=_truthy(os.environ.get("YYT1771_AF_OFFLINE_LOOP", "0")),
+            )
         raise ValueError(f"unsupported camera profile: {profile}")
+
+    def _initial_frame(self, source: CameraSource) -> Frame:
+        peek_frame = getattr(source, "peek_frame", None)
+        if callable(peek_frame):
+            return peek_frame()
+        return source.get_latest_frame()
+
+    def _cache_frame(self, frame: Frame) -> None:
+        self._frames[frame.frame_id] = frame
+        self._frames.move_to_end(frame.frame_id)
+        self._trim_cache()
+
+    def _trim_cache(self) -> None:
+        while len(self._frames) > self._max_cached_frames:
+            evictable_id = next(
+                (frame_id for frame_id in self._frames if frame_id not in self._pinned_frame_ids),
+                None,
+            )
+            if evictable_id is None:
+                break
+            self._frames.pop(evictable_id, None)
+
+
+def _truthy(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _frame_to_svg(image: np.ndarray) -> str:
