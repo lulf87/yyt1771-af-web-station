@@ -25,7 +25,7 @@ def test_mock_camera_open_status_and_freeze_returns_acquisition_frame() -> None:
     assert freeze_response.status_code == 200
     freeze_payload = freeze_response.json()
     assert freeze_payload["preview_url"].startswith("/api/camera/frame/")
-    assert freeze_payload["preview_url"].endswith("/preview.svg")
+    assert "/preview.png" in freeze_payload["preview_url"]
     assert freeze_payload["frame_ref"] == {
         "frame_id": status_payload["latest_frame_id"],
         "timestamp_ms": freeze_payload["frame_ref"]["timestamp_ms"],

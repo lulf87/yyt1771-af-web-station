@@ -3,7 +3,11 @@ import type {
   CameraStatus,
   AnalysisResponse,
   ExportFormat,
+  FramePreviewMetadata,
   FreezeResponse,
+  OfflinePlaybackFrame,
+  OfflinePlaybackOpenRequest,
+  OfflinePlaybackStatus,
   RunListResponse,
   RunSamplesResponse,
   RunStartRequest,
@@ -28,6 +32,10 @@ export async function openCamera(profile = "dev_mock"): Promise<CameraOpenRespon
 
 export async function getCameraStatus(): Promise<CameraStatus> {
   return requestJson<CameraStatus>("/api/camera/status");
+}
+
+export async function getLatestFramePreview(maxWidth = 1200): Promise<FramePreviewMetadata> {
+  return requestJson<FramePreviewMetadata>(`/api/camera/frame/latest?max_width=${maxWidth}`);
 }
 
 export async function freezeSetupFrame(): Promise<FreezeResponse> {
@@ -74,6 +82,42 @@ export async function stopRun(runId: string): Promise<RunStopResponse> {
 
 export async function getRunSamples(runId: string): Promise<RunSamplesResponse> {
   return requestJson<RunSamplesResponse>(`/api/runs/${runId}/samples`);
+}
+
+export async function openOfflinePlayback(
+  request: OfflinePlaybackOpenRequest,
+): Promise<OfflinePlaybackStatus> {
+  return requestJson<OfflinePlaybackStatus>("/api/offline-playback/open", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function getOfflinePlaybackStatus(): Promise<OfflinePlaybackStatus> {
+  return requestJson<OfflinePlaybackStatus>("/api/offline-playback/status");
+}
+
+export async function seekOfflinePlayback(frameIndex: number): Promise<OfflinePlaybackFrame> {
+  return requestJson<OfflinePlaybackFrame>("/api/offline-playback/seek", {
+    method: "POST",
+    body: JSON.stringify({ frame_index: frameIndex }),
+  });
+}
+
+export async function nextOfflinePlayback(failuresOnly: boolean): Promise<OfflinePlaybackFrame> {
+  return requestJson<OfflinePlaybackFrame>("/api/offline-playback/next", {
+    method: "POST",
+    body: JSON.stringify({ failures_only: failuresOnly }),
+  });
+}
+
+export async function previousOfflinePlayback(
+  failuresOnly: boolean,
+): Promise<OfflinePlaybackFrame> {
+  return requestJson<OfflinePlaybackFrame>("/api/offline-playback/previous", {
+    method: "POST",
+    body: JSON.stringify({ failures_only: failuresOnly }),
+  });
 }
 
 export async function listRuns(): Promise<RunListResponse> {

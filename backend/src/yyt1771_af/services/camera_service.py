@@ -13,6 +13,12 @@ from yyt1771_af.camera.offline import OfflineFolderCameraSource
 from yyt1771_af.core.config import load_camera_profile_config, resolve_configured_path
 from yyt1771_af.core.models import Frame, FrameRef
 from yyt1771_af.core.statuses import CoordinateSpace
+from yyt1771_af.services.frame_preview_service import (
+    FramePreviewMetadata,
+    FramePreviewPng,
+    build_frame_preview_metadata,
+    build_frame_preview_png,
+)
 
 
 class CameraOpenResult(BaseModel):
@@ -112,6 +118,49 @@ class CameraService:
             raise KeyError(f"frame {frame_id} is not available")
         return _frame_to_svg(frame.image)
 
+    def preview_metadata(
+        self,
+        *,
+        max_width: int,
+        max_height: int | None = None,
+    ) -> FramePreviewMetadata:
+        frame = self.current_frame()
+        return build_frame_preview_metadata(
+            frame_id=frame.frame_id,
+            frame_index=frame.frame_index,
+            frame_name=frame.frame_name,
+            acquisition_width=frame.width,
+            acquisition_height=frame.height,
+            preview_url=_camera_preview_url(
+                frame.frame_id,
+                max_width=max_width,
+                max_height=max_height,
+            ),
+            max_width=max_width,
+            max_height=max_height,
+        )
+
+    def preview_png(
+        self,
+        frame_id: int,
+        *,
+        max_width: int,
+        max_height: int | None = None,
+    ) -> FramePreviewPng:
+        frame = self._frames.get(frame_id)
+        if frame is None:
+            raise KeyError(f"frame {frame_id} is not available")
+        return build_frame_preview_png(
+            frame=frame,
+            preview_url=_camera_preview_url(
+                frame.frame_id,
+                max_width=max_width,
+                max_height=max_height,
+            ),
+            max_width=max_width,
+            max_height=max_height,
+        )
+
     def _source_for_profile(self, profile: str) -> CameraSource:
         profile_reference = _profile_reference(profile)
         profile_config = load_camera_profile_config(profile_reference)
@@ -163,6 +212,18 @@ def _truthy(value: str) -> bool:
 
 def _profile_reference(profile: str) -> str:
     return {"mock": "dev_mock", "offline": "dev_offline"}.get(profile, profile)
+
+
+def _camera_preview_url(
+    frame_id: int,
+    *,
+    max_width: int,
+    max_height: int | None = None,
+) -> str:
+    url = f"/api/camera/frame/{frame_id}/preview.png?max_width={max_width}"
+    if max_height is not None:
+        url += f"&max_height={max_height}"
+    return url
 
 
 def _frame_to_svg(image: np.ndarray) -> str:

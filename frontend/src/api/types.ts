@@ -95,8 +95,23 @@ export interface SetupDetectResponse {
   distance_px: number | null;
   quality: number;
   target_family: TargetFamily;
-  detector: string;
+  detector?: string;
+  frame_ref?: FrameRef | null;
   diagnostics: Record<string, unknown>;
+}
+
+export interface FramePreviewMetadata {
+  frame_id: number | null;
+  frame_index: number | null;
+  frame_name: string | null;
+  acquisition_width: number;
+  acquisition_height: number;
+  display_width: number;
+  display_height: number;
+  scale_x: number;
+  scale_y: number;
+  coordinate_space: CoordinateSpace;
+  preview_url: string;
 }
 
 export interface MeasurementDefinition {
@@ -193,6 +208,43 @@ export interface RunSample {
 export interface RunSamplesResponse {
   run_id: string;
   samples: RunSample[];
+}
+
+export interface OfflinePlaybackOpenRequest {
+  frames_dir?: string | null;
+  evaluation_output_dir?: string | null;
+  dataset_label?: string | null;
+  target_family: TargetFamily;
+  roi: RotatedRoi;
+  fps: number;
+  recipe_name?: string | null;
+  max_preview_width?: number;
+}
+
+export interface OfflinePlaybackFrame {
+  frame_index: number;
+  frame_name: string;
+  relative_time_s: number;
+  acquisition_width: number;
+  acquisition_height: number;
+  display_width: number;
+  display_height: number;
+  scale_x: number;
+  scale_y: number;
+  coordinate_space: CoordinateSpace;
+  preview_url: string;
+  detection: SetupDetectResponse;
+}
+
+export interface OfflinePlaybackStatus {
+  opened: boolean;
+  mode: string;
+  dataset_label: string | null;
+  frame_count: number;
+  current_frame_index: number | null;
+  top_jump_frames: number[];
+  failure_frame_indices: number[];
+  current: OfflinePlaybackFrame | null;
 }
 
 export interface RunSummary {

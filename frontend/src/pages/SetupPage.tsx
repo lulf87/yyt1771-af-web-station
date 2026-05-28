@@ -155,12 +155,23 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
 
       <section className="setup-grid" aria-label="Setup workspace">
         <section className="frame-stage" aria-label="Frame preview">
-          <FrameCanvas detection={detection} frameRef={frameRef} previewUrl={previewUrl} roi={roi} />
+          <FrameCanvas
+            detection={detection}
+            frameRef={frameRef}
+            interactive
+            onRoiChange={(nextRoi) => {
+              setRoi(nextRoi);
+              setDetection(null);
+            }}
+            previewUrl={previewUrl}
+            roi={roi}
+          />
         </section>
 
         <aside className="setup-panel" aria-label="Setup controls">
           <section className="panel-section">
             <h2>Source</h2>
+            <p className="panel-note">Static mock is only a smoke test; offline source uses local .npy frames.</p>
             <div className="button-row compact">
               <button disabled={isBusy} onClick={handleOpenMock} type="button">
                 Open mock source

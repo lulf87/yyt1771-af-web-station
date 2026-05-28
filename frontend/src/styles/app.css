@@ -133,6 +133,12 @@ select {
   gap: 18px;
 }
 
+.playback-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 18px;
+}
+
 .analysis-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
@@ -189,8 +195,20 @@ select {
   pointer-events: none;
 }
 
+.frame-overlay.editable {
+  cursor: crosshair;
+  pointer-events: auto;
+  touch-action: none;
+}
+
 .roi-overlay {
   fill: rgba(214, 117, 42, 0.08);
+  stroke: #d6752a;
+  stroke-width: 2;
+}
+
+.roi-handle {
+  fill: #ffffff;
   stroke: #d6752a;
   stroke-width: 2;
 }
@@ -225,6 +243,13 @@ select {
   font-size: 15px;
 }
 
+.panel-note {
+  margin: 0 0 10px;
+  color: #617182;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .segmented-control {
   display: grid;
   grid-template-columns: 1fr;
@@ -249,9 +274,34 @@ select {
 }
 
 .roi-editor span,
-.metric-list dt {
+.metric-list dt,
+.stacked-field span,
+.inline-check span {
   color: #617182;
   font-size: 13px;
+}
+
+.stacked-field {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.two-column-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-check input {
+  width: auto;
+  min-height: auto;
 }
 
 .metric-list {
@@ -282,6 +332,10 @@ select {
   color: #b42318;
 }
 
+.compact-metrics {
+  margin-top: 10px;
+}
+
 .button-row {
   display: grid;
   gap: 10px;
@@ -289,6 +343,11 @@ select {
 }
 
 .button-row.compact {
+  margin-top: 0;
+}
+
+.button-row.horizontal {
+  grid-template-columns: 1fr 1fr 1fr;
   margin-top: 0;
 }
 
@@ -332,6 +391,20 @@ select {
   background: #ffffff;
 }
 
+.run-main {
+  display: grid;
+  gap: 18px;
+}
+
+.compact-frame {
+  min-height: 420px;
+}
+
+.compact-frame .frame-empty,
+.compact-frame .frame-view {
+  min-height: 380px;
+}
+
 .summary-tile {
   display: grid;
   gap: 6px;
@@ -373,6 +446,17 @@ select {
 
 .bar.invalid {
   background: #b42318;
+}
+
+.jump-button-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.muted-text {
+  color: #617182;
+  font-size: 13px;
 }
 
 .samples-panel {
@@ -483,6 +567,7 @@ select {
   }
 
   .run-grid,
+  .playback-grid,
   .analysis-grid,
   .run-summary {
     grid-template-columns: 1fr;

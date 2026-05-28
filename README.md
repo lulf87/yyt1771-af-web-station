@@ -2,26 +2,31 @@
 
 Browser UI plus Python backend for supporting YY/T 1771-style AF visual measurement workflows.
 
-The current version runs without real camera hardware. It supports mock frames, offline `.npy`/PGM frame folders, contour-based A/B detection for the two public detector families, setup/run/analysis/export flows, temperature mock support, and an Offline Real-Capture Validation workflow for checking real captured frame folders before Hik MVS integration.
+The current version runs without real camera hardware. It supports static mock frames, real offline `.npy`/PGM frame folders, contour-based A/B detection for the two public detector families, GUI ROI editing, setup/run/playback/analysis/export flows, temperature mock support, and an Offline Real-Capture Validation workflow for checking real captured frame folders before Hik MVS integration.
 
 ## Current Scope
 
 - FastAPI backend under `backend/src/yyt1771_af`.
-- Vite React TypeScript frontend with setup, run, and analysis pages.
+- Vite React TypeScript frontend with setup, run, offline playback, and analysis pages.
 - GUI source selection for both `dev_mock` and `dev_offline`.
 - Two public detector implementations only:
   - `BalloonEnvelopeDetector`
   - `WireStripDetector`
 - Formal ROI, A/B points, and `distance_px` stored in `acquisition` coordinates.
-- Mock camera source for deterministic local development.
+- Static `320 x 220` mock camera source for deterministic smoke tests and automated tests.
 - Offline camera source for lazy streaming of `.npy` and PGM frame folders.
+- Downsampled PNG frame preview APIs for high-resolution offline frames.
+- Setup page ROI editing by mouse drag/move/resize plus numeric fields.
+- Result panels show backend A/B coordinates, distance, quality, status, reason, detector, and coordinate space.
+- Run page latest-frame overlay for ROI and backend-returned A/B points.
+- Offline Playback page for replaying real offline frames and validation samples with slider, play/pause, failures-only stepping, and top-jump navigation.
 - Offline Real-Capture Validation service and CLI.
 - Dataset manifest, per-frame JSONL/CSV samples, summary JSON, curves, histogram, jump report, and optional debug overlays.
 - JSON and YAML config loading for profiles, recipes, and offline validation configs.
 - Template ROI/config files under `configs/validation/` and `configs/local/`.
 - JSON, CSV, PNG, and XLSX run export paths with local path redaction.
 - Temperature controller abstraction with mock/file/serial-placeholder paths.
-- Hik MVS real camera adapter is still intentionally deferred.
+- Hik MVS real camera adapter is still intentionally deferred and not implemented.
 
 ## Requirements
 
@@ -82,7 +87,7 @@ Start the frontend development server:
 npm --prefix frontend run dev
 ```
 
-In the Setup page, use `Open mock source` for generated frames or `Open offline source` for a configured local offline frame folder.
+In the Setup page, use `Open mock source` for the static smoke-test frame or `Open offline source` for a configured local offline frame folder. Drag on the frame to create a ROI, drag inside it to move it, drag handles to resize it, and use the numeric fields for precise acquisition-coordinate values.
 
 Build and check the frontend:
 
@@ -163,6 +168,31 @@ overlays/
 ```
 
 Use `evaluation_summary.json`, `point_jump_summary.json`, and overlays to decide whether A/B is stable enough to proceed toward real Hik MVS adapter work.
+
+## GUI Offline Playback
+
+Set the local frame folder:
+
+```bash
+export YYT1771_AF_OFFLINE_DIR="/absolute/path/to/local/frames"
+```
+
+Start backend and frontend, then open the Playback page. Leave `Frames dir` empty to use `YYT1771_AF_OFFLINE_DIR`, or enter a local frame folder path. Optionally enter an evaluation output directory such as:
+
+```text
+validation_results/offline_eval_balloon_300
+```
+
+Playback uses `evaluation_samples.jsonl` when an evaluation directory is provided. It loads sample metadata, fetches frame previews on demand, and draws only backend/evaluation A/B points in acquisition coordinates.
+
+Useful GUI checks:
+
+- Setup: hand-draw ROI on the first real frame and run detection.
+- Result: read A/B x/y, distance, quality, status, reason, detector, and coordinate space.
+- Run: start a short run and inspect the latest-frame overlay.
+- Playback: play continuous offline frames, jump to `top_jump_frames`, and isolate failure frames.
+
+See `docs/15_GUI_OFFLINE_PLAYBACK_AND_ROI_UX.md` for the detailed workflow.
 
 ## Configs
 

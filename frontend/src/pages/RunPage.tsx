@@ -2,12 +2,22 @@ import { useState } from "react";
 
 import { getRunSamples, getRunStatus, startRun, stopRun } from "../api/client";
 import type { MeasurementDefinition, RunSample, RunStatusResponse } from "../api/types";
+import { FrameCanvas } from "../components/FrameCanvas";
 import { TemperaturePanel } from "../components/TemperaturePanel";
 import { latestSample, sampleRows } from "../run/sampleDisplay";
 
 interface RunPageProps {
   measurementDefinition: MeasurementDefinition | null;
 }
+
+const fallbackRoi = {
+  center_x: 1,
+  center_y: 1,
+  width: 1,
+  height: 1,
+  angle_deg: 0,
+  coordinate_space: "acquisition" as const,
+};
 
 export function RunPage({ measurementDefinition }: RunPageProps) {
   const [runStatus, setRunStatus] = useState<RunStatusResponse | null>(null);
@@ -16,6 +26,11 @@ export function RunPage({ measurementDefinition }: RunPageProps) {
   const [error, setError] = useState<string | null>(null);
 
   const latest = latestSample(samples);
+  const latestFrameRef = latest?.detection.frame_ref ?? null;
+  const latestPreviewUrl =
+    latestFrameRef === null
+      ? null
+      : `/api/camera/frame/${latestFrameRef.frame_id}/preview.png?max_width=1200`;
   const rows = sampleRows(samples).slice(-12).reverse();
   const chartSamples = samples.slice(-24);
   const maxDistance = Math.max(
@@ -81,44 +96,56 @@ export function RunPage({ measurementDefinition }: RunPageProps) {
       </header>
 
       <section className="run-grid" aria-label="Run workspace">
-        <section className="run-summary">
-          <div className="summary-tile">
-            <span>Distance</span>
-            <strong>
-              {latest?.detection.distance_px === null || !latest
-                ? "-"
-                : latest.detection.distance_px.toFixed(2)}
-            </strong>
-          </div>
-          <div className="summary-tile">
-            <span>Status</span>
-            <strong>{latest?.detection.status ?? "waiting"}</strong>
-          </div>
-          <div className="summary-tile">
-            <span>Quality</span>
-            <strong>{latest ? latest.detection.quality.toFixed(2) : "-"}</strong>
-          </div>
-          <div className="summary-tile">
-            <span>Temperature</span>
-            <strong>
-              {latest?.temperature_c === null || !latest ? "-" : latest.temperature_c.toFixed(1)}
-            </strong>
-          </div>
+        <section className="run-main" aria-label="Run frame and samples">
+          <section className="run-summary">
+            <div className="summary-tile">
+              <span>Distance</span>
+              <strong>
+                {latest?.detection.distance_px === null || !latest
+                  ? "-"
+                  : latest.detection.distance_px.toFixed(2)}
+              </strong>
+            </div>
+            <div className="summary-tile">
+              <span>Status</span>
+              <strong>{latest?.detection.status ?? "waiting"}</strong>
+            </div>
+            <div className="summary-tile">
+              <span>Quality</span>
+              <strong>{latest ? latest.detection.quality.toFixed(2) : "-"}</strong>
+            </div>
+            <div className="summary-tile">
+              <span>Temperature</span>
+              <strong>
+                {latest?.temperature_c === null || !latest ? "-" : latest.temperature_c.toFixed(1)}
+              </strong>
+            </div>
 
-          <div className="run-chart" aria-label="Recent distance samples">
-            {chartSamples.map((sample) => {
-              const distance = sample.detection.distance_px;
-              const height = distance === null ? 8 : Math.max(8, (distance / maxDistance) * 130);
-              return (
-                <div
-                  className={distance === null ? "bar invalid" : "bar"}
-                  key={sample.sample_index}
-                  style={{ height }}
-                  title={`${sample.sample_index}: ${sample.detection.status}, ${sample.temperature_status}`}
-                />
-              );
-            })}
-          </div>
+            <div className="run-chart" aria-label="Recent distance samples">
+              {chartSamples.map((sample) => {
+                const distance = sample.detection.distance_px;
+                const height = distance === null ? 8 : Math.max(8, (distance / maxDistance) * 130);
+                return (
+                  <div
+                    className={distance === null ? "bar invalid" : "bar"}
+                    key={sample.sample_index}
+                    style={{ height }}
+                    title={`${sample.sample_index}: ${sample.detection.status}, ${sample.temperature_status}`}
+                  />
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="frame-stage compact-frame" aria-label="Latest run frame">
+            <FrameCanvas
+              detection={latest?.detection ?? null}
+              emptyLabel="Start a run to show the latest frame"
+              frameRef={latestFrameRef}
+              previewUrl={latestPreviewUrl}
+              roi={measurementDefinition?.roi ?? fallbackRoi}
+            />
+          </section>
         </section>
 
         <aside className="setup-panel" aria-label="Run controls">

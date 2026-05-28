@@ -79,7 +79,7 @@ class SetupService:
         self._camera.pin_frame(frame.frame_id)
         return FreezeResponse(
             frame_ref=frame_ref,
-            preview_url=f"/api/camera/frame/{frame.frame_id}/preview.svg",
+            preview_url=f"/api/camera/frame/{frame.frame_id}/preview.png?max_width=1200",
         )
 
     def detect(self, request: SetupDetectRequest) -> SetupDetectResponse:
