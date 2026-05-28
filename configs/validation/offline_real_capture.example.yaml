@@ -1,0 +1,12 @@
+target_family: balloon_envelope
+roi:
+  center_x: 1024.0
+  center_y: 682.0
+  width: 800.0
+  height: 300.0
+  angle_deg: 0.0
+  coordinate_space: acquisition
+recipe:
+  name: offline_real_capture_baseline
+fps: 10.0
+dataset_label: offline_real_capture_example

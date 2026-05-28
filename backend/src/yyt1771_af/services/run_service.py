@@ -154,7 +154,8 @@ class RunService:
                 frame_ref=frame_ref,
                 diagnostics=DetectionDiagnostics(
                     detector=_detector_params_for_target(
-                        measurement_definition.target_family
+                        measurement_definition.target_family,
+                        measurement_definition.recipe_name,
                     ).detector_kind,
                     message="Frame dimensions differ from the confirmed measurement definition.",
                 ),
@@ -164,8 +165,14 @@ class RunService:
                 frame=frame.image,
                 roi=measurement_definition.roi,
                 target_family=measurement_definition.target_family,
-                segmentation=_segmentation_for_target(measurement_definition.target_family),
-                params=_detector_params_for_target(measurement_definition.target_family),
+                segmentation=_segmentation_for_target(
+                    measurement_definition.target_family,
+                    measurement_definition.recipe_name,
+                ),
+                params=_detector_params_for_target(
+                    measurement_definition.target_family,
+                    measurement_definition.recipe_name,
+                ),
             )
             detection.frame_ref = frame_ref
 

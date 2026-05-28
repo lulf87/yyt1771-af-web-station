@@ -60,3 +60,41 @@ def test_offline_validate_cli_uses_env_frames_dir_and_writes_summary(
     assert exit_code == 0
     assert "evaluation_summary.json" in captured.out
     assert (output_dir / "evaluation_summary.json").exists()
+
+
+def test_offline_validate_cli_reads_yaml_config(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    image = np.full((48, 64), 230, dtype=np.uint8)
+    image[18:30, 24:40] = 30
+    np.save(frames_dir / "frame_1.npy", image)
+    config_path = tmp_path / "offline.yaml"
+    output_dir = tmp_path / "out"
+    config_path.write_text(
+        f"""
+target_family: wire_strip
+frames_dir: "{frames_dir}"
+output_dir: "{output_dir}"
+fps: 10.0
+roi:
+  center_x: 32.0
+  center_y: 24.0
+  width: 30.0
+  height: 24.0
+  angle_deg: 0.0
+  coordinate_space: acquisition
+recipe:
+  name: yaml_cli_trial
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["--config", str(config_path), "--max-frames", "1"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "evaluation_summary.json" in captured.out
+    assert (output_dir / "evaluation_manifest.json").exists()

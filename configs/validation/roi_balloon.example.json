@@ -9,8 +9,6 @@
     "coordinate_space": "acquisition"
   },
   "recipe": {
-    "name": "offline_real_capture_baseline"
-  },
-  "fps": 10.0,
-  "dataset_label": "offline_real_capture_example"
+    "name": "offline_real_capture_balloon_template"
+  }
 }

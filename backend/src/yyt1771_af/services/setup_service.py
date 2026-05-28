@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
+from yyt1771_af.core.config import load_detector_recipe_config
 from yyt1771_af.core.models import (
     AcquisitionFrameSize,
     BalloonEnvelopeDetectorParams,
@@ -87,8 +88,8 @@ class SetupService:
             frame=frame.image,
             roi=request.roi,
             target_family=request.target_family,
-            segmentation=_segmentation_for_target(request.target_family),
-            params=_detector_params_for_target(request.target_family),
+            segmentation=_segmentation_for_target(request.target_family, request.recipe_name),
+            params=_detector_params_for_target(request.target_family, request.recipe_name),
         )
         return _serialize_detection_result(result)
 
@@ -120,18 +121,18 @@ class SetupService:
         return measurement_definition
 
 
-def _segmentation_for_target(target_family: TargetFamily) -> SegmentationParams:
-    if target_family is TargetFamily.BALLOON_ENVELOPE:
-        return SegmentationParams(close_kernel=7, open_kernel=1, min_component_area_px=80)
-    return SegmentationParams(close_kernel=5, open_kernel=1, min_component_area_px=50)
+def _segmentation_for_target(
+    target_family: TargetFamily,
+    recipe_name: str | None = None,
+) -> SegmentationParams:
+    return load_detector_recipe_config(target_family, recipe_name).segmentation
 
 
 def _detector_params_for_target(
     target_family: TargetFamily,
+    recipe_name: str | None = None,
 ) -> BalloonEnvelopeDetectorParams | WireStripDetectorParams:
-    if target_family is TargetFamily.BALLOON_ENVELOPE:
-        return BalloonEnvelopeDetectorParams()
-    return WireStripDetectorParams()
+    return load_detector_recipe_config(target_family, recipe_name).detector
 
 
 def _serialize_detection_result(result: DetectionResult) -> SetupDetectResponse:

@@ -18,6 +18,7 @@ from yyt1771_af.camera.offline import (
     load_offline_frame_info,
     parsed_frame_index,
 )
+from yyt1771_af.core.config import load_detector_recipe_config
 from yyt1771_af.core.geometry import euclidean_distance, roi_inside_frame
 from yyt1771_af.core.models import (
     BalloonEnvelopeDetectorParams,
@@ -60,6 +61,7 @@ class OfflineValidationRequest:
     start_frame: int = 0
     overlay_policy: OverlayPolicy = field(default_factory=OverlayPolicy)
     dataset_label: str | None = None
+    recipe_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +187,7 @@ def run_offline_validation(request: OfflineValidationRequest) -> OfflineValidati
         frame_height=first_frame.shape[0] - 1,
     ):
         raise ValueError("ROI is outside first frame bounds")
+    recipe = load_detector_recipe_config(request.target_family, request.recipe_name)
 
     samples: list[dict[str, Any]] = []
     start_time = time.perf_counter()
@@ -208,6 +211,8 @@ def run_offline_validation(request: OfflineValidationRequest) -> OfflineValidati
                 relative_time_s=frame_index / request.fps,
                 target_family=request.target_family,
                 roi=request.roi,
+                segmentation=recipe.segmentation,
+                params=recipe.detector,
             )
             samples.append(sample)
             jsonl_handle.write(json.dumps(sample, separators=(",", ":")) + "\n")
@@ -254,6 +259,8 @@ def _evaluate_frame(
     relative_time_s: float,
     target_family: TargetFamily,
     roi: RotatedRoi,
+    segmentation: SegmentationParams,
+    params: BalloonEnvelopeDetectorParams | WireStripDetectorParams,
 ) -> dict[str, Any]:
     start = time.perf_counter()
     try:
@@ -262,8 +269,8 @@ def _evaluate_frame(
             frame=frame,
             roi=roi,
             target_family=target_family,
-            segmentation=_segmentation_for_target(target_family),
-            params=_detector_params_for_target(target_family),
+            segmentation=segmentation,
+            params=params,
         )
     except (OSError, ValueError) as exc:
         processing_ms = (time.perf_counter() - start) * 1000.0
@@ -298,20 +305,6 @@ def _evaluate_frame(
         "reason": reason,
         "processing_ms": round(processing_ms, 6),
     }
-
-
-def _segmentation_for_target(target_family: TargetFamily) -> SegmentationParams:
-    if target_family is TargetFamily.BALLOON_ENVELOPE:
-        return SegmentationParams(close_kernel=7, open_kernel=1, min_component_area_px=80)
-    return SegmentationParams(close_kernel=5, open_kernel=1, min_component_area_px=50)
-
-
-def _detector_params_for_target(
-    target_family: TargetFamily,
-) -> BalloonEnvelopeDetectorParams | WireStripDetectorParams:
-    if target_family is TargetFamily.BALLOON_ENVELOPE:
-        return BalloonEnvelopeDetectorParams()
-    return WireStripDetectorParams()
 
 
 def _detector_kind(target_family: TargetFamily) -> DetectorKind:

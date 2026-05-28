@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from yyt1771_af.camera.base import CameraSource
 from yyt1771_af.camera.mock import MockCameraSource
 from yyt1771_af.camera.offline import OfflineFolderCameraSource
+from yyt1771_af.core.config import load_camera_profile_config, resolve_configured_path
 from yyt1771_af.core.models import Frame, FrameRef
 from yyt1771_af.core.statuses import CoordinateSpace
 
@@ -112,15 +113,25 @@ class CameraService:
         return _frame_to_svg(frame.image)
 
     def _source_for_profile(self, profile: str) -> CameraSource:
-        if profile in {"dev_mock", "mock"}:
+        profile_reference = _profile_reference(profile)
+        profile_config = load_camera_profile_config(profile_reference)
+        camera_config = profile_config.camera
+        camera_type = str(camera_config.get("type", profile_reference))
+        if camera_type == "mock":
             return MockCameraSource()
-        if profile in {"dev_offline", "offline"}:
-            folder_value = os.environ.get("YYT1771_AF_OFFLINE_DIR")
+        if camera_type == "offline_folder":
+            folder_value = os.environ.get("YYT1771_AF_OFFLINE_DIR") or camera_config.get(
+                "image_folder"
+            )
             if folder_value is None:
                 raise FileNotFoundError("YYT1771_AF_OFFLINE_DIR is required for dev_offline")
+            loop_value = os.environ.get("YYT1771_AF_OFFLINE_LOOP")
+            loop = (
+                _truthy(loop_value) if loop_value is not None else bool(camera_config.get("loop"))
+            )
             return OfflineFolderCameraSource(
-                Path(folder_value),
-                loop=_truthy(os.environ.get("YYT1771_AF_OFFLINE_LOOP", "0")),
+                resolve_configured_path(Path(str(folder_value))),
+                loop=loop,
             )
         raise ValueError(f"unsupported camera profile: {profile}")
 
@@ -148,6 +159,10 @@ class CameraService:
 
 def _truthy(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _profile_reference(profile: str) -> str:
+    return {"mock": "dev_mock", "offline": "dev_offline"}.get(profile, profile)
 
 
 def _frame_to_svg(image: np.ndarray) -> str:

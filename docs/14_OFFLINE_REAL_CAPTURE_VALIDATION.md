@@ -46,9 +46,9 @@ The CLI also accepts `--frames-dir`. If omitted, it reads `YYT1771_AF_OFFLINE_DI
 
 Artifacts never store this absolute path. They store a dataset label, frame basenames such as `frame_000001.npy`, counts, and relative artifact names.
 
-## ROI JSON
+## ROI Config JSON/YAML
 
-ROI JSON must use acquisition coordinates:
+ROI config files can be JSON, YAML, or YML. ROI values must use acquisition coordinates:
 
 ```json
 {
@@ -65,6 +65,23 @@ ROI JSON must use acquisition coordinates:
     "name": "offline_real_capture_baseline"
   }
 }
+```
+
+The equivalent YAML form is also supported:
+
+```yaml
+target_family: balloon_envelope
+roi:
+  center_x: 1024.0
+  center_y: 682.0
+  width: 800.0
+  height: 300.0
+  angle_deg: 0.0
+  coordinate_space: acquisition
+recipe:
+  name: offline_real_capture_baseline
+fps: 10.0
+dataset_label: offline_real_capture_example
 ```
 
 For wire validation:
@@ -85,10 +102,12 @@ For wire validation:
 
 Initial local templates are provided at:
 
-- `configs/local/roi_balloon.example.local.json`
-- `configs/local/roi_wire.example.local.json`
+- `configs/validation/offline_real_capture.example.json`
+- `configs/validation/offline_real_capture.example.yaml`
+- `configs/validation/roi_balloon.example.json`
+- `configs/validation/roi_wire.example.json`
 
-Copy or edit them locally and adjust `center_x`, `center_y`, `width`, `height`, and `angle_deg` from the first frame. The CLI rejects ROI values outside the frame bounds.
+Copy them into `configs/local/` or another ignored local location, then adjust `center_x`, `center_y`, `width`, `height`, and `angle_deg` from the first frame. The CLI rejects ROI values outside the frame bounds. `--roi-json` remains a backward-compatible alias, but new commands should use `--config`.
 
 ## Smoke Test: 30 Frames
 
@@ -96,7 +115,7 @@ Copy or edit them locally and adjust `center_x`, `center_y`, `width`, `height`, 
 python -m yyt1771_af.cli.offline_validate \
   --frames-dir "$YYT1771_AF_OFFLINE_DIR" \
   --target-family balloon_envelope \
-  --roi-json ./configs/local/roi_balloon.example.local.json \
+  --config ./configs/validation/roi_balloon.example.json \
   --fps 10 \
   --output-dir ./validation_results/offline_eval_balloon_smoke \
   --max-frames 30 \
@@ -111,7 +130,7 @@ Use this to verify ROI placement, basic detection status, and overlay rendering.
 python -m yyt1771_af.cli.offline_validate \
   --frames-dir "$YYT1771_AF_OFFLINE_DIR" \
   --target-family wire_strip \
-  --roi-json ./configs/local/roi_wire.example.local.json \
+  --config ./configs/validation/roi_wire.example.json \
   --fps 10 \
   --output-dir ./validation_results/offline_eval_wire_300 \
   --max-frames 300 \
@@ -131,7 +150,7 @@ Omit `--max-frames`:
 python -m yyt1771_af.cli.offline_validate \
   --frames-dir "$YYT1771_AF_OFFLINE_DIR" \
   --target-family balloon_envelope \
-  --roi-json ./configs/local/roi_balloon.example.local.json \
+  --config ./configs/validation/roi_balloon.example.json \
   --fps 10 \
   --output-dir ./validation_results/offline_eval_balloon_full \
   --overlay-first 10 \

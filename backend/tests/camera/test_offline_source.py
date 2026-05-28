@@ -121,3 +121,28 @@ def test_camera_service_cache_is_bounded_for_many_offline_frames(
         service.get_latest_frame()
 
     assert service.cached_frame_count <= 3
+
+
+def test_camera_service_opens_offline_folder_from_yaml_profile(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    _write_frame(frames_dir / "frame_1.npy", 1, shape=(5, 7))
+    profile_path = tmp_path / "dev_offline.local.yaml"
+    profile_path.write_text(
+        f"""
+profile_name: dev_offline_local
+camera:
+  type: offline_folder
+  image_folder: "{frames_dir}"
+  loop: false
+""",
+        encoding="utf-8",
+    )
+    service = CameraService()
+
+    result = service.open(str(profile_path))
+    status = service.status()
+
+    assert result.source_type == "offline"
+    assert status.frame_width == 7
+    assert status.frame_height == 5

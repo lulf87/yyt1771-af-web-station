@@ -1,5 +1,5 @@
 {
-  "target_family": "balloon_envelope",
+  "target_family": "wire_strip",
   "roi": {
     "center_x": 1024.0,
     "center_y": 682.0,
@@ -9,8 +9,6 @@
     "coordinate_space": "acquisition"
   },
   "recipe": {
-    "name": "offline_real_capture_baseline"
-  },
-  "fps": 10.0,
-  "dataset_label": "offline_real_capture_example"
+    "name": "offline_real_capture_wire_template"
+  }
 }
