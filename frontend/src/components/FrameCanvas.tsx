@@ -65,6 +65,7 @@ export function FrameCanvas({
   const pointA = detection?.point_a ? pointToOverlayCircle(detection.point_a) : null;
   const pointB = detection?.point_b ? pointToOverlayCircle(detection.point_b) : null;
   const canEdit = interactive && onRoiChange !== undefined;
+  const isInvalidDetection = detection !== null && !detection.valid;
 
   function pointerToAcquisition(event: PointerEvent<SVGSVGElement>): Point2D {
     if (svgRef.current === null) {
@@ -143,7 +144,19 @@ export function FrameCanvas({
         role="img"
         viewBox={`0 0 ${activeFrameRef.width} ${activeFrameRef.height}`}
       >
-        <rect className="roi-overlay" {...roiRect} vectorEffect="non-scaling-stroke" />
+        <rect
+          className={isInvalidDetection ? "roi-overlay invalid" : "roi-overlay"}
+          {...roiRect}
+          vectorEffect="non-scaling-stroke"
+        />
+        {isInvalidDetection ? (
+          <g className="detection-invalid-banner">
+            <rect height="34" rx="4" width="360" x="12" y="12" />
+            <text x="26" y="34">
+              {detection.status}
+            </text>
+          </g>
+        ) : null}
         {canEdit
           ? Object.entries(handles).map(([handle, point]) => (
               <circle

@@ -118,5 +118,6 @@ A task is done only when:
 - Code matches the relevant docs.
 - Tests are added or updated.
 - Tests and lint pass or failures are clearly explained.
+- Every fix is confirmed in a real browser when it affects the Web UI or user-facing API flow; report the browser URL, action taken, and observed result. If browser confirmation is impossible, state the blocker explicitly.
 - No old-project references are introduced.
 - macOS/Windows portability rules remain satisfied.

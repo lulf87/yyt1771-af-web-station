@@ -207,10 +207,25 @@ select {
   stroke-width: 2;
 }
 
+.roi-overlay.invalid {
+  fill: rgba(180, 35, 24, 0.1);
+  stroke: #b42318;
+}
+
 .roi-handle {
   fill: #ffffff;
   stroke: #d6752a;
   stroke-width: 2;
+}
+
+.detection-invalid-banner rect {
+  fill: rgba(180, 35, 24, 0.92);
+}
+
+.detection-invalid-banner text {
+  fill: #ffffff;
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .measurement-line {

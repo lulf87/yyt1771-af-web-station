@@ -49,4 +49,34 @@ describe("FrameCanvas", () => {
     expect(markup).toContain('x2="160"');
     expect(markup).toContain('cy="110"');
   });
+
+  it("makes invalid detection visible without drawing fake A/B points", () => {
+    const invalidDetection: SetupDetectResponse = {
+      status: "caliper_contact_on_roi_boundary",
+      valid: false,
+      point_a: null,
+      point_b: null,
+      distance_px: null,
+      quality: 1,
+      target_family: "balloon_envelope",
+      detector: "balloon_envelope_detector:v1",
+      diagnostics: {},
+    };
+
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={invalidDetection}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+      />,
+    );
+
+    expect(markup).toContain("detection-invalid-banner");
+    expect(markup).toContain("caliper_contact_on_roi_boundary");
+    expect(markup).toContain("roi-overlay invalid");
+    expect(markup).not.toContain("measurement-line");
+    expect(markup).not.toContain("point point-a");
+    expect(markup).not.toContain("point point-b");
+  });
 });
