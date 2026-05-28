@@ -142,7 +142,16 @@ Request:
     "coordinate_space": "acquisition"
   },
   "target_family": "balloon_envelope",
-  "recipe_name": "balloon_envelope_default"
+  "recipe_name": "balloon_envelope_default",
+  "segmentation": {
+    "polarity": "auto",
+    "threshold_mode": "otsu",
+    "threshold_value": null,
+    "blur_kernel": 3,
+    "close_kernel": 11,
+    "open_kernel": 3,
+    "min_component_area_px": 500
+  }
 }
 ```
 
@@ -158,9 +167,20 @@ Successful response:
   "quality": 0.93,
   "target_family": "balloon_envelope",
   "detector": "balloon_envelope_detector:v1",
+  "debug_overlay_url": "/api/setup/debug-overlay/dbg_abc123.png?max_width=1200",
   "diagnostics": {
     "contour_area_px": 123456.0,
-    "candidate_components": 1
+    "candidate_components": 1,
+    "threshold_value": 196,
+    "selected_polarity": "auto_dark_selected",
+    "selected_reason": "preferred_point_dark",
+    "foreground_area_ratio_in_roi": 0.48,
+    "selected_component_bbox": {
+      "min_x": 643,
+      "min_y": 324,
+      "max_x": 1765,
+      "max_y": 1125
+    }
   }
 }
 ```
@@ -178,10 +198,23 @@ Failure response:
   "target_family": "wire_strip",
   "detector": "wire_strip_detector:v1",
   "diagnostics": {
-    "message": "Only one valid contour side found in ROI measurement direction."
+    "message": "Only one valid contour side found in ROI measurement direction.",
+    "rejected_contact_side": "right",
+    "distance_to_right_roi_boundary_px": 0.54,
+    "boundary_margin_px": 4.0,
+    "rejected_candidate_point_b": {
+      "x": 1765.0,
+      "y": 684.0,
+      "coordinate_space": "acquisition"
+    }
   }
 }
 ```
+
+`debug_overlay_url` returns a downsampled PNG visualization of the original frame,
+ROI, foreground mask, selected component, selected contour, boundary margin lines,
+and debug-only rejected contact candidates. It must not contain local filesystem
+paths.
 
 ### `POST /api/setup/confirm`
 

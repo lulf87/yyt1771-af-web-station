@@ -18,6 +18,21 @@ class BinaryComponent:
         return int(self.coordinates_yx.shape[0])
 
 
+@dataclass(frozen=True, slots=True)
+class SegmentationDebug:
+    threshold_value: int | None
+    contrast: float
+    dark_area_ratio: float
+    light_area_ratio: float
+    selected_polarity: str | None
+    selected_reason: str | None
+    preferred_point_xy: tuple[float, float] | None
+    preferred_point_hit_dark: bool
+    preferred_point_hit_light: bool
+    foreground_area_px: int
+    foreground_area_ratio_in_roi: float
+
+
 def segment_target_mask(
     frame: np.ndarray,
     roi_mask: np.ndarray,
@@ -25,19 +40,54 @@ def segment_target_mask(
     *,
     preferred_point_xy: tuple[float, float] | None = None,
 ) -> tuple[np.ndarray, float]:
+    foreground, quality, _ = segment_target_mask_debug(
+        frame,
+        roi_mask,
+        params,
+        preferred_point_xy=preferred_point_xy,
+    )
+    return foreground, quality
+
+
+def segment_target_mask_debug(
+    frame: np.ndarray,
+    roi_mask: np.ndarray,
+    params: SegmentationParams,
+    *,
+    preferred_point_xy: tuple[float, float] | None = None,
+) -> tuple[np.ndarray, float, SegmentationDebug]:
     image = _as_grayscale_uint8(frame)
     roi_values = image[roi_mask]
+    roi_area = max(1, int(np.count_nonzero(roi_mask)))
     if roi_values.size == 0:
-        return np.zeros_like(roi_mask, dtype=bool), 0.0
+        foreground = np.zeros_like(roi_mask, dtype=bool)
+        return foreground, 0.0, _empty_debug(preferred_point_xy)
 
     contrast = float(np.percentile(roi_values, 95) - np.percentile(roi_values, 5))
     if contrast <= 4.0:
-        return np.zeros_like(roi_mask, dtype=bool), 0.0
+        foreground = np.zeros_like(roi_mask, dtype=bool)
+        return (
+            foreground,
+            0.0,
+            SegmentationDebug(
+                threshold_value=None,
+                contrast=contrast,
+                dark_area_ratio=0.0,
+                light_area_ratio=0.0,
+                selected_polarity=None,
+                selected_reason=None,
+                preferred_point_xy=preferred_point_xy,
+                preferred_point_hit_dark=False,
+                preferred_point_hit_light=False,
+                foreground_area_px=0,
+                foreground_area_ratio_in_roi=0.0,
+            ),
+        )
 
     threshold = _threshold_value(roi_values, params)
     dark_mask = (image <= threshold) & roi_mask
     light_mask = (image > threshold) & roi_mask
-    foreground = _choose_polarity_mask(
+    foreground, polarity_debug = _choose_polarity_mask_debug(
         dark_mask,
         light_mask,
         roi_mask,
@@ -48,7 +98,21 @@ def segment_target_mask(
     foreground = binary_close(foreground, params.close_kernel)
     foreground = binary_open(foreground, params.open_kernel)
     foreground &= roi_mask
-    return foreground, min(1.0, contrast / 80.0)
+    foreground_area = int(np.count_nonzero(foreground))
+    debug = SegmentationDebug(
+        threshold_value=threshold,
+        contrast=contrast,
+        dark_area_ratio=float(np.count_nonzero(dark_mask) / roi_area),
+        light_area_ratio=float(np.count_nonzero(light_mask) / roi_area),
+        selected_polarity=polarity_debug["selected_polarity"],
+        selected_reason=polarity_debug["selected_reason"],
+        preferred_point_xy=preferred_point_xy,
+        preferred_point_hit_dark=bool(polarity_debug["preferred_point_hit_dark"]),
+        preferred_point_hit_light=bool(polarity_debug["preferred_point_hit_light"]),
+        foreground_area_px=foreground_area,
+        foreground_area_ratio_in_roi=float(foreground_area / roi_area),
+    )
+    return foreground, min(1.0, contrast / 80.0), debug
 
 
 def connected_components(mask: np.ndarray, min_area_px: int) -> list[BinaryComponent]:
@@ -216,33 +280,100 @@ def _choose_polarity_mask(
     *,
     preferred_point_xy: tuple[float, float] | None,
 ) -> np.ndarray:
+    foreground, _ = _choose_polarity_mask_debug(
+        dark_mask,
+        light_mask,
+        roi_mask,
+        polarity,
+        preferred_point_xy=preferred_point_xy,
+    )
+    return foreground
+
+
+def _choose_polarity_mask_debug(
+    dark_mask: np.ndarray,
+    light_mask: np.ndarray,
+    roi_mask: np.ndarray,
+    polarity: str,
+    *,
+    preferred_point_xy: tuple[float, float] | None,
+) -> tuple[np.ndarray, dict[str, str | bool]]:
     if polarity == "dark_on_light":
-        return dark_mask.copy()
+        return dark_mask.copy(), {
+            "selected_polarity": "dark_on_light",
+            "selected_reason": "forced_dark",
+            "preferred_point_hit_dark": _point_hits_mask(dark_mask, preferred_point_xy),
+            "preferred_point_hit_light": _point_hits_mask(light_mask, preferred_point_xy),
+        }
     if polarity == "light_on_dark":
-        return light_mask.copy()
+        return light_mask.copy(), {
+            "selected_polarity": "light_on_dark",
+            "selected_reason": "forced_light",
+            "preferred_point_hit_dark": _point_hits_mask(dark_mask, preferred_point_xy),
+            "preferred_point_hit_light": _point_hits_mask(light_mask, preferred_point_xy),
+        }
 
     roi_area = max(1, int(np.count_nonzero(roi_mask)))
     candidates = [dark_mask, light_mask]
-    preferred_candidate = _candidate_containing_point(candidates, preferred_point_xy)
-    if preferred_candidate is not None:
-        return preferred_candidate.copy()
+    preferred_index, dark_hit, light_hit = _candidate_index_containing_point(
+        candidates,
+        preferred_point_xy,
+    )
+    if preferred_index is not None:
+        return candidates[preferred_index].copy(), {
+            "selected_polarity": "auto_dark_selected"
+            if preferred_index == 0
+            else "auto_light_selected",
+            "selected_reason": "preferred_point_dark"
+            if preferred_index == 0
+            else "preferred_point_light",
+            "preferred_point_hit_dark": dark_hit,
+            "preferred_point_hit_light": light_hit,
+        }
 
-    plausible = [
-        candidate
-        for candidate in candidates
+    plausible_indices = [
+        index
+        for index, candidate in enumerate(candidates)
         if 0.01 <= (np.count_nonzero(candidate) / roi_area) <= 0.80
     ]
-    if not plausible:
-        return min(candidates, key=np.count_nonzero).copy()
-    return min(plausible, key=np.count_nonzero).copy()
+    if not plausible_indices:
+        selected_index = min(
+            range(len(candidates)),
+            key=lambda index: np.count_nonzero(candidates[index]),
+        )
+        return candidates[selected_index].copy(), {
+            "selected_polarity": "auto_dark_selected"
+            if selected_index == 0
+            else "auto_light_selected",
+            "selected_reason": "fallback_min_area",
+            "preferred_point_hit_dark": dark_hit,
+            "preferred_point_hit_light": light_hit,
+        }
+    selected_index = min(plausible_indices, key=lambda index: np.count_nonzero(candidates[index]))
+    return candidates[selected_index].copy(), {
+        "selected_polarity": "auto_dark_selected" if selected_index == 0 else "auto_light_selected",
+        "selected_reason": "plausible_area_dark" if selected_index == 0 else "plausible_area_light",
+        "preferred_point_hit_dark": dark_hit,
+        "preferred_point_hit_light": light_hit,
+    }
 
 
 def _candidate_containing_point(
     candidates: list[np.ndarray],
     preferred_point_xy: tuple[float, float] | None,
 ) -> np.ndarray | None:
-    if preferred_point_xy is None:
+    preferred_index, _, _ = _candidate_index_containing_point(candidates, preferred_point_xy)
+    if preferred_index is None:
         return None
+    return candidates[preferred_index]
+
+
+def _candidate_index_containing_point(
+    candidates: list[np.ndarray],
+    preferred_point_xy: tuple[float, float] | None,
+) -> tuple[int | None, bool, bool]:
+    if preferred_point_xy is None:
+        return None, False, False
 
     x, y = preferred_point_xy
     point_x = int(round(x))
@@ -257,8 +388,35 @@ def _candidate_containing_point(
         scores.append(int(np.count_nonzero(candidate[y_min:y_max, x_min:x_max])))
     best_index = int(np.argmax(scores))
     if scores[best_index] > 0 and scores.count(scores[best_index]) == 1:
-        return candidates[best_index]
-    return None
+        return best_index, scores[0] > 0, scores[1] > 0
+    return None, scores[0] > 0, scores[1] > 0
+
+
+def _point_hits_mask(mask: np.ndarray, point_xy: tuple[float, float] | None) -> bool:
+    if point_xy is None:
+        return False
+    x, y = point_xy
+    point_x = int(round(x))
+    point_y = int(round(y))
+    if not (0 <= point_y < mask.shape[0] and 0 <= point_x < mask.shape[1]):
+        return False
+    return bool(mask[point_y, point_x])
+
+
+def _empty_debug(preferred_point_xy: tuple[float, float] | None) -> SegmentationDebug:
+    return SegmentationDebug(
+        threshold_value=None,
+        contrast=0.0,
+        dark_area_ratio=0.0,
+        light_area_ratio=0.0,
+        selected_polarity=None,
+        selected_reason=None,
+        preferred_point_xy=preferred_point_xy,
+        preferred_point_hit_dark=False,
+        preferred_point_hit_light=False,
+        foreground_area_px=0,
+        foreground_area_ratio_in_roi=0.0,
+    )
 
 
 def _neighbors8(y: int, x: int) -> Iterable[tuple[int, int]]:

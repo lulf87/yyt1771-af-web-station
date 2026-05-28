@@ -147,6 +147,23 @@ class DetectionDiagnostics(BaseModel):
     contour_area_px: float | None = None
     contour_point_count: int | None = None
     candidate_components: int | None = None
+    threshold_value: int | None = None
+    selected_polarity: str | None = None
+    selected_reason: str | None = None
+    foreground_area_px: int | None = None
+    foreground_area_ratio_in_roi: float | None = None
+    selected_component_area_px: int | None = None
+    selected_component_bbox: dict | None = None
+    candidate_component_count: int | None = None
+    min_local_projection: float | None = None
+    max_local_projection: float | None = None
+    roi_half_width: float | None = None
+    distance_to_left_roi_boundary_px: float | None = None
+    distance_to_right_roi_boundary_px: float | None = None
+    boundary_margin_px: float | None = None
+    rejected_contact_side: str | None = None
+    rejected_candidate_point_a: Point2D | None = None
+    rejected_candidate_point_b: Point2D | None = None
     message: str | None = None
 
 class DetectionResult(BaseModel):
@@ -165,6 +182,9 @@ Rules:
 
 - If `valid == true`, then `status == ok`, `point_a`, `point_b`, and `distance_px` must be present.
 - If `valid == false`, then `distance_px` must be null.
+- If `valid == false`, formal `point_a` and `point_b` must be null. Debug-only
+  rejected candidates may appear under `diagnostics.rejected_candidate_point_a` and
+  `diagnostics.rejected_candidate_point_b`; they are not measurement outputs.
 - `quality` must always be present.
 - `point_a` and `point_b`, when present, must be in `acquisition` coordinates.
 - `diagnostics.detector` must be either `balloon_envelope_detector` or `wire_strip_detector`.

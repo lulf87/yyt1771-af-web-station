@@ -1,0 +1,53 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+
+import type { SetupDetectResponse } from "../api/types";
+import { StatusPanel } from "./StatusPanel";
+
+describe("StatusPanel debug diagnostics", () => {
+  it("shows boundary debug diagnostics without promoting rejected candidates to formal A/B", () => {
+    const detection: SetupDetectResponse = {
+      status: "caliper_contact_on_roi_boundary",
+      valid: false,
+      point_a: null,
+      point_b: null,
+      distance_px: null,
+      quality: 1,
+      target_family: "balloon_envelope",
+      detector: "balloon_envelope_detector:v1",
+      diagnostics: {
+        message: "Selected contour is too close to the ROI boundary.",
+        selected_polarity: "auto_dark_selected",
+        selected_reason: "preferred_point_dark",
+        threshold_value: 196,
+        foreground_area_ratio_in_roi: 0.48,
+        selected_component_area_px: 676613,
+        selected_component_bbox: { min_x: 643, min_y: 324, max_x: 1765, max_y: 1125 },
+        candidate_component_count: 2,
+        min_local_projection: -508.4,
+        max_local_projection: 613.6,
+        distance_to_left_roi_boundary_px: 105.7,
+        distance_to_right_roi_boundary_px: 0.54,
+        rejected_contact_side: "right",
+        boundary_margin_px: 4,
+        rejected_candidate_point_a: { x: 643, y: 700, coordinate_space: "acquisition" },
+        rejected_candidate_point_b: { x: 1765, y: 700, coordinate_space: "acquisition" },
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <StatusPanel cameraStatus={null} detection={detection} error={null} />,
+    );
+
+    expect(markup).toContain("A x,y");
+    expect(markup).toContain("N/A");
+    expect(markup).toContain("Debug Diagnostics");
+    expect(markup).toContain("auto_dark_selected");
+    expect(markup).toContain("preferred_point_dark");
+    expect(markup).toContain("196");
+    expect(markup).toContain("0.54");
+    expect(markup).toContain("right");
+    expect(markup).toContain("rejected/debug");
+    expect(markup).toContain("不要直接放宽边界保护");
+  });
+});

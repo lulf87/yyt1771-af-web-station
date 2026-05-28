@@ -4,8 +4,8 @@ import math
 
 import numpy as np
 
-from yyt1771_af.core.geometry import rotated_roi_corners
-from yyt1771_af.core.models import Point2D, RotatedRoi
+from yyt1771_af.core.geometry import roi_measurement_direction, rotated_roi_corners
+from yyt1771_af.core.models import DetectionResult, Point2D, RotatedRoi
 from yyt1771_af.report.simple_png import (
     draw_circle,
     draw_line,
@@ -15,6 +15,7 @@ from yyt1771_af.report.simple_png import (
     encode_png,
     grayscale_to_rgb,
 )
+from yyt1771_af.services.frame_preview_service import preview_size
 
 
 def render_debug_overlay_png(
@@ -70,3 +71,185 @@ def render_debug_overlay_png(
         draw_text(pixels, width, 8, 32, f"REASON:{reason_text}", (255, 220, 120), scale=2)
 
     return encode_png(width, height, pixels)
+
+
+def render_detection_debug_overlay_png(
+    *,
+    frame: np.ndarray,
+    roi: RotatedRoi,
+    detection: DetectionResult,
+    foreground_mask: np.ndarray | None,
+    selected_component_mask: np.ndarray | None,
+    selected_contour_mask: np.ndarray | None,
+    max_width: int = 1200,
+    max_height: int | None = None,
+) -> bytes:
+    source = np.asarray(frame)
+    if source.ndim != 2:
+        raise ValueError("debug overlay requires a 2D grayscale frame")
+    acquisition_height, acquisition_width = source.shape
+    display_width, display_height = preview_size(
+        acquisition_width=acquisition_width,
+        acquisition_height=acquisition_height,
+        max_width=max_width,
+        max_height=max_height,
+    )
+    y_indices = np.linspace(0, acquisition_height - 1, display_height).astype(np.int64)
+    x_indices = np.linspace(0, acquisition_width - 1, display_width).astype(np.int64)
+    preview = np.clip(source[np.ix_(y_indices, x_indices)], 0, 255).astype(np.uint8)
+    rgb = np.repeat(preview[:, :, None], 3, axis=2)
+
+    _blend_mask(rgb, _downsample_mask(foreground_mask, y_indices, x_indices), (60, 180, 255), 0.26)
+    _blend_mask(
+        rgb,
+        _downsample_mask(selected_component_mask, y_indices, x_indices),
+        (255, 174, 66),
+        0.36,
+    )
+    _blend_mask(
+        rgb,
+        _downsample_mask(selected_contour_mask, y_indices, x_indices),
+        (255, 64, 64),
+        0.85,
+    )
+
+    pixels = bytearray(rgb.astype(np.uint8).tobytes())
+    scale_x = display_width / acquisition_width
+    scale_y = display_height / acquisition_height
+    scaled_roi = RotatedRoi(
+        center_x=roi.center_x * scale_x,
+        center_y=roi.center_y * scale_y,
+        width=roi.width * scale_x,
+        height=roi.height * scale_y,
+        angle_deg=roi.angle_deg,
+    )
+    roi_points = [
+        (int(round(point.x)), int(round(point.y))) for point in rotated_roi_corners(scaled_roi)
+    ]
+    draw_polyline(
+        pixels,
+        display_width,
+        [*roi_points, roi_points[0]],
+        (24, 144, 255),
+        thickness=2,
+    )
+    _draw_boundary_margin_lines(
+        pixels,
+        display_width,
+        scaled_roi,
+        float(detection.diagnostics.boundary_margin_px or 0.0) * scale_x,
+    )
+
+    _draw_point(
+        pixels,
+        display_width,
+        detection.diagnostics.rejected_candidate_point_a,
+        scale_x,
+        scale_y,
+        (190, 120, 255),
+    )
+    _draw_point(
+        pixels,
+        display_width,
+        detection.diagnostics.rejected_candidate_point_b,
+        scale_x,
+        scale_y,
+        (80, 255, 180),
+    )
+    _draw_point(pixels, display_width, detection.point_a, scale_x, scale_y, (255, 80, 80))
+    _draw_point(pixels, display_width, detection.point_b, scale_x, scale_y, (80, 220, 120))
+
+    draw_rect(pixels, display_width, 0, 0, min(display_width - 1, 900), 70, (0, 0, 0))
+    status_text = detection.status.value
+    polarity_text = detection.diagnostics.selected_polarity or "-"
+    side_text = detection.diagnostics.rejected_contact_side or "-"
+    right_distance = detection.diagnostics.distance_to_right_roi_boundary_px
+    right_text = "-" if right_distance is None else f"{right_distance:.2f}"
+    draw_text(
+        pixels,
+        display_width,
+        8,
+        8,
+        f"STATUS:{status_text} POL:{polarity_text}",
+        (255, 255, 255),
+        scale=2,
+    )
+    draw_text(
+        pixels,
+        display_width,
+        8,
+        34,
+        f"SIDE:{side_text} RIGHT_MARGIN:{right_text} DEBUG CANDIDATES",
+        (255, 220, 120),
+        scale=2,
+    )
+    return encode_png(display_width, display_height, pixels)
+
+
+def _downsample_mask(
+    mask: np.ndarray | None,
+    y_indices: np.ndarray,
+    x_indices: np.ndarray,
+) -> np.ndarray | None:
+    if mask is None:
+        return None
+    return np.asarray(mask, dtype=bool)[np.ix_(y_indices, x_indices)]
+
+
+def _blend_mask(
+    rgb: np.ndarray,
+    mask: np.ndarray | None,
+    color: tuple[int, int, int],
+    alpha: float,
+) -> None:
+    if mask is None or not np.any(mask):
+        return
+    color_array = np.asarray(color, dtype=np.float32)
+    rgb[mask] = np.round(rgb[mask].astype(np.float32) * (1.0 - alpha) + color_array * alpha)
+
+
+def _draw_point(
+    pixels: bytearray,
+    width: int,
+    point: Point2D | None,
+    scale_x: float,
+    scale_y: float,
+    color: tuple[int, int, int],
+) -> None:
+    if point is None:
+        return
+    draw_circle(
+        pixels,
+        width,
+        int(round(point.x * scale_x)),
+        int(round(point.y * scale_y)),
+        5,
+        color,
+    )
+
+
+def _draw_boundary_margin_lines(
+    pixels: bytearray,
+    width: int,
+    roi: RotatedRoi,
+    margin_px: float,
+) -> None:
+    if margin_px <= 0:
+        return
+    unit_x, unit_y = roi_measurement_direction(roi.angle_deg)
+    perp_x, perp_y = -unit_y, unit_x
+    for local_x in (-roi.width / 2.0 + margin_px, roi.width / 2.0 - margin_px):
+        x0 = roi.center_x + local_x * unit_x - roi.height / 2.0 * perp_x
+        y0 = roi.center_y + local_x * unit_y - roi.height / 2.0 * perp_y
+        x1 = roi.center_x + local_x * unit_x + roi.height / 2.0 * perp_x
+        y1 = roi.center_y + local_x * unit_y + roi.height / 2.0 * perp_y
+        draw_line(
+            pixels,
+            width,
+            int(round(x0)),
+            int(round(y0)),
+            int(round(x1)),
+            int(round(y1)),
+            (255, 230, 80),
+            thickness=1,
+        )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from yyt1771_af.services.setup_service import (
     FreezeRequest,
@@ -39,3 +39,22 @@ def confirm_setup(request: SetupConfirmRequest) -> SetupConfirmResponse:
         return setup_service.confirm(request)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/debug-overlay/{debug_id}.png")
+def get_setup_debug_overlay(
+    debug_id: str,
+    max_width: int = Query(default=1200, ge=1, le=4096),
+    max_height: int | None = Query(default=None, ge=1, le=4096),
+) -> Response:
+    try:
+        png = setup_service.debug_overlay_png(
+            debug_id,
+            max_width=max_width,
+            max_height=max_height,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="debug overlay is not available") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(content=png, media_type="image/png")

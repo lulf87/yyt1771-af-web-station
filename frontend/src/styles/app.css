@@ -283,6 +283,11 @@ select {
   gap: 10px;
 }
 
+.segmentation-controls {
+  display: grid;
+  gap: 10px;
+}
+
 .roi-editor label {
   display: grid;
   gap: 5px;
@@ -345,6 +350,47 @@ select {
 
 .metric-list .metric-error dd {
   color: #b42318;
+}
+
+.debug-diagnostics {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border-top: 1px solid #e3e8ee;
+  padding-top: 12px;
+}
+
+.debug-diagnostics h3,
+.debug-overlay-panel h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.debug-warning {
+  margin: 0;
+  border-left: 3px solid #b45309;
+  padding-left: 10px;
+  color: #6b3b0a;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.debug-list div {
+  grid-template-columns: minmax(118px, auto) minmax(0, 1fr);
+}
+
+.debug-overlay-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.debug-overlay-panel img {
+  display: block;
+  width: 100%;
+  border: 1px solid #9aa9b8;
+  border-radius: 6px;
+  background: #111820;
 }
 
 .compact-metrics {

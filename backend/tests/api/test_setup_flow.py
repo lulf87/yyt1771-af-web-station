@@ -70,6 +70,51 @@ def test_setup_detect_returns_backend_ab_points_for_balloon_recipe() -> None:
     assert payload["distance_px"] > 90.0
     assert 0.0 <= payload["quality"] <= 1.0
     assert "diagnostics" in payload
+    assert payload["debug_overlay_url"].startswith("/api/setup/debug-overlay/")
+
+
+def test_setup_detect_accepts_segmentation_override_and_serves_debug_overlay() -> None:
+    client = TestClient(app)
+    client.post("/api/camera/open", json={"profile": "dev_mock"})
+    frame_ref = client.post("/api/setup/freeze", json={"source": "latest"}).json()["frame_ref"]
+
+    detect_response = client.post(
+        "/api/setup/detect",
+        json={
+            "frame_ref": frame_ref,
+            "roi": {
+                "center_x": 110.0,
+                "center_y": 110.0,
+                "width": 130.0,
+                "height": 80.0,
+                "angle_deg": 0.0,
+                "coordinate_space": "acquisition",
+            },
+            "target_family": "balloon_envelope",
+            "recipe_name": "balloon_envelope_default",
+            "segmentation": {
+                "polarity": "dark_on_light",
+                "threshold_mode": "otsu",
+                "threshold_value": None,
+                "blur_kernel": 3,
+                "close_kernel": 7,
+                "open_kernel": 1,
+                "min_component_area_px": 50,
+            },
+        },
+    )
+
+    assert detect_response.status_code == 200
+    payload = detect_response.json()
+    assert payload["diagnostics"]["selected_polarity"] == "dark_on_light"
+    assert payload["diagnostics"]["selected_reason"] == "forced_dark"
+    assert payload["diagnostics"]["threshold_value"] is not None
+    assert payload["debug_overlay_url"].startswith("/api/setup/debug-overlay/")
+
+    overlay_response = client.get(payload["debug_overlay_url"])
+    assert overlay_response.status_code == 200
+    assert overlay_response.headers["content-type"] == "image/png"
+    assert overlay_response.content.startswith(b"\x89PNG")
 
 
 def test_setup_detect_returns_backend_ab_points_for_wire_recipe() -> None:

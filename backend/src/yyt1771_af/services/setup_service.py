@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import uuid4
 
+import numpy as np
 from pydantic import BaseModel
 
 from yyt1771_af.core.config import load_detector_recipe_config
@@ -18,8 +20,26 @@ from yyt1771_af.core.models import (
     WireStripDetectorParams,
 )
 from yyt1771_af.core.statuses import TargetFamily
+from yyt1771_af.report.debug_overlay import render_detection_debug_overlay_png
 from yyt1771_af.services.camera_service import CameraService, camera_service
 from yyt1771_af.vision.detection import detect_target
+from yyt1771_af.vision.roi_ops import rotated_roi_mask
+from yyt1771_af.vision.segmentation import (
+    connected_components,
+    contour_mask,
+    fill_internal_holes,
+    segment_target_mask_debug,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class DebugOverlayArtifact:
+    frame_ref: FrameRef
+    roi: RotatedRoi
+    detection: DetectionResult
+    foreground_mask: np.ndarray | None
+    selected_component_mask: np.ndarray | None
+    selected_contour_mask: np.ndarray | None
 
 
 class FreezeRequest(BaseModel):
@@ -36,6 +56,7 @@ class SetupDetectRequest(BaseModel):
     roi: RotatedRoi
     target_family: TargetFamily
     recipe_name: str
+    segmentation: SegmentationParams | None = None
 
 
 class SetupDetectResponse(BaseModel):
@@ -48,6 +69,7 @@ class SetupDetectResponse(BaseModel):
     target_family: str
     detector: str
     diagnostics: dict[str, Any]
+    debug_overlay_url: str | None = None
 
 
 class SetupConfirmRequest(BaseModel):
@@ -55,6 +77,7 @@ class SetupConfirmRequest(BaseModel):
     target_family: TargetFamily
     roi: RotatedRoi
     recipe_name: str
+    segmentation: SegmentationParams | None = None
 
 
 class SetupConfirmResponse(BaseModel):
@@ -68,6 +91,7 @@ class SetupService:
         self._camera = camera
         self._frozen_frame_ref: FrameRef | None = None
         self._measurement_definitions: dict[str, MeasurementDefinition] = {}
+        self._debug_artifacts: dict[str, DebugOverlayArtifact] = {}
 
     def freeze(self, request: FreezeRequest) -> FreezeResponse:
         if request.source != "latest":
@@ -84,14 +108,33 @@ class SetupService:
 
     def detect(self, request: SetupDetectRequest) -> SetupDetectResponse:
         frame = self._camera.get_frame(request.frame_ref)
+        segmentation = request.segmentation or _segmentation_for_target(
+            request.target_family,
+            request.recipe_name,
+        )
+        detector_params = _detector_params_for_target(request.target_family, request.recipe_name)
         result = detect_target(
             frame=frame.image,
             roi=request.roi,
             target_family=request.target_family,
-            segmentation=_segmentation_for_target(request.target_family, request.recipe_name),
-            params=_detector_params_for_target(request.target_family, request.recipe_name),
+            segmentation=segmentation,
+            params=detector_params,
         )
-        return _serialize_detection_result(result)
+        debug_id = f"dbg_{uuid4().hex[:12]}"
+        self._debug_artifacts[debug_id] = _build_debug_artifact(
+            frame_ref=request.frame_ref,
+            frame_image=frame.image,
+            roi=request.roi,
+            target_family=request.target_family,
+            segmentation=segmentation,
+            detector_params=detector_params,
+            detection=result,
+        )
+        self._trim_debug_artifacts()
+        return _serialize_detection_result(
+            result,
+            debug_overlay_url=f"/api/setup/debug-overlay/{debug_id}.png?max_width=1200",
+        )
 
     def confirm(self, request: SetupConfirmRequest) -> SetupConfirmResponse:
         frame = self._camera.current_frame()
@@ -101,6 +144,7 @@ class SetupService:
             target_family=request.target_family,
             roi=request.roi,
             recipe_name=request.recipe_name,
+            segmentation=request.segmentation,
             detector_version="v1",
             acquisition_frame_size=AcquisitionFrameSize(width=frame.width, height=frame.height),
             created_at_ms=time.time_ns() // 1_000_000,
@@ -120,6 +164,33 @@ class SetupService:
             raise KeyError(f"measurement definition {measurement_definition_id} is not available")
         return measurement_definition
 
+    def debug_overlay_png(
+        self,
+        debug_id: str,
+        *,
+        max_width: int,
+        max_height: int | None = None,
+    ) -> bytes:
+        artifact = self._debug_artifacts.get(debug_id)
+        if artifact is None:
+            raise KeyError(f"debug overlay {debug_id} is not available")
+        frame = self._camera.get_frame(artifact.frame_ref)
+        return render_detection_debug_overlay_png(
+            frame=frame.image,
+            roi=artifact.roi,
+            detection=artifact.detection,
+            foreground_mask=artifact.foreground_mask,
+            selected_component_mask=artifact.selected_component_mask,
+            selected_contour_mask=artifact.selected_contour_mask,
+            max_width=max_width,
+            max_height=max_height,
+        )
+
+    def _trim_debug_artifacts(self) -> None:
+        while len(self._debug_artifacts) > 4:
+            first_key = next(iter(self._debug_artifacts))
+            self._debug_artifacts.pop(first_key, None)
+
 
 def _segmentation_for_target(
     target_family: TargetFamily,
@@ -135,7 +206,11 @@ def _detector_params_for_target(
     return load_detector_recipe_config(target_family, recipe_name).detector
 
 
-def _serialize_detection_result(result: DetectionResult) -> SetupDetectResponse:
+def _serialize_detection_result(
+    result: DetectionResult,
+    *,
+    debug_overlay_url: str | None = None,
+) -> SetupDetectResponse:
     diagnostics = result.diagnostics.model_dump(mode="json", exclude_none=True)
     detector_kind = diagnostics.pop("detector")
     detector_version = diagnostics.pop("detector_version")
@@ -149,6 +224,51 @@ def _serialize_detection_result(result: DetectionResult) -> SetupDetectResponse:
         target_family=result.target_family.value,
         detector=f"{detector_kind}:{detector_version}",
         diagnostics=diagnostics,
+        debug_overlay_url=debug_overlay_url,
+    )
+
+
+def _build_debug_artifact(
+    *,
+    frame_ref: FrameRef,
+    frame_image: np.ndarray,
+    roi: RotatedRoi,
+    target_family: TargetFamily,
+    segmentation: SegmentationParams,
+    detector_params: BalloonEnvelopeDetectorParams | WireStripDetectorParams,
+    detection: DetectionResult,
+) -> DebugOverlayArtifact:
+    try:
+        roi_mask = rotated_roi_mask(frame_image.shape, roi)
+        foreground, _, _ = segment_target_mask_debug(
+            frame_image,
+            roi_mask,
+            segmentation,
+            preferred_point_xy=(roi.center_x, roi.center_y),
+        )
+        if (
+            target_family is TargetFamily.BALLOON_ENVELOPE
+            and isinstance(detector_params, BalloonEnvelopeDetectorParams)
+            and detector_params.fill_internal_holes
+        ):
+            foreground = fill_internal_holes(foreground)
+            foreground &= roi_mask
+        components = connected_components(foreground, segmentation.min_component_area_px)
+        selected_component_mask = components[0].mask if components else None
+        selected_contour_mask = (
+            contour_mask(selected_component_mask) if selected_component_mask is not None else None
+        )
+    except ValueError:
+        foreground = None
+        selected_component_mask = None
+        selected_contour_mask = None
+    return DebugOverlayArtifact(
+        frame_ref=frame_ref,
+        roi=roi,
+        detection=detection,
+        foreground_mask=foreground,
+        selected_component_mask=selected_component_mask,
+        selected_contour_mask=selected_contour_mask,
     )
 
 

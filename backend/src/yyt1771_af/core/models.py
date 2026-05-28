@@ -77,6 +77,13 @@ class SegmentationParams(BaseModel):
     min_component_area_px: int = Field(default=50, gt=0)
 
 
+class ComponentBBox(BaseModel):
+    min_x: int
+    min_y: int
+    max_x: int
+    max_y: int
+
+
 class BalloonEnvelopeDetectorParams(BaseModel):
     detector_kind: Literal[DetectorKind.BALLOON_ENVELOPE_DETECTOR] = (
         DetectorKind.BALLOON_ENVELOPE_DETECTOR
@@ -129,6 +136,29 @@ class DetectionDiagnostics(BaseModel):
     contour_area_px: float | None = None
     contour_point_count: int | None = None
     candidate_components: int | None = None
+    threshold_value: int | None = None
+    selected_polarity: str | None = None
+    selected_reason: str | None = None
+    contrast: float | None = None
+    dark_area_ratio: float | None = None
+    light_area_ratio: float | None = None
+    preferred_point_xy: Point2D | None = None
+    preferred_point_hit_dark: bool | None = None
+    preferred_point_hit_light: bool | None = None
+    foreground_area_px: int | None = None
+    foreground_area_ratio_in_roi: float | None = None
+    selected_component_area_px: int | None = None
+    selected_component_bbox: ComponentBBox | None = None
+    candidate_component_count: int | None = None
+    min_local_projection: float | None = None
+    max_local_projection: float | None = None
+    roi_half_width: float | None = None
+    distance_to_left_roi_boundary_px: float | None = None
+    distance_to_right_roi_boundary_px: float | None = None
+    boundary_margin_px: float | None = None
+    rejected_contact_side: str | None = None
+    rejected_candidate_point_a: Point2D | None = None
+    rejected_candidate_point_b: Point2D | None = None
     message: str | None = None
 
 
@@ -233,6 +263,7 @@ class MeasurementDefinition(BaseModel):
     target_family: TargetFamily
     roi: RotatedRoi
     recipe_name: str
+    segmentation: SegmentationParams | None = None
     detector_version: str = "v1"
     acquisition_frame_size: AcquisitionFrameSize
     coordinate_space: CoordinateSpace = CoordinateSpace.ACQUISITION

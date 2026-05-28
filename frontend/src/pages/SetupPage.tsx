@@ -12,11 +12,13 @@ import type {
   FrameRef,
   MeasurementDefinition,
   RotatedRoi,
+  SegmentationParams,
   SetupDetectResponse,
   TargetFamily,
 } from "../api/types";
 import { FrameCanvas } from "../components/FrameCanvas";
 import { RoiEditor } from "../components/RoiEditor";
+import { SegmentationControls } from "../components/SegmentationControls";
 import { StatusPanel } from "../components/StatusPanel";
 import { TargetFamilySelector } from "../components/TargetFamilySelector";
 
@@ -39,6 +41,27 @@ const defaultRois: Record<TargetFamily, RotatedRoi> = {
   },
 };
 
+const defaultSegmentations: Record<TargetFamily, SegmentationParams> = {
+  balloon_envelope: {
+    polarity: "auto",
+    threshold_mode: "otsu",
+    threshold_value: null,
+    blur_kernel: 3,
+    close_kernel: 11,
+    open_kernel: 3,
+    min_component_area_px: 500,
+  },
+  wire_strip: {
+    polarity: "auto",
+    threshold_mode: "adaptive",
+    threshold_value: null,
+    blur_kernel: 3,
+    close_kernel: 5,
+    open_kernel: 3,
+    min_component_area_px: 80,
+  },
+};
+
 interface SetupPageProps {
   onMeasurementDefinitionConfirmed: (measurementDefinition: MeasurementDefinition) => void;
 }
@@ -49,6 +72,9 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [targetFamily, setTargetFamily] = useState<TargetFamily>("balloon_envelope");
   const [roi, setRoi] = useState<RotatedRoi>(defaultRois.balloon_envelope);
+  const [segmentation, setSegmentation] = useState<SegmentationParams>(
+    defaultSegmentations.balloon_envelope,
+  );
   const [detection, setDetection] = useState<SetupDetectResponse | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +129,7 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
         roi,
         target_family: targetFamily,
         recipe_name: recipeName,
+        segmentation,
       });
       setDetection(result);
     });
@@ -115,6 +142,7 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
         target_family: targetFamily,
         roi,
         recipe_name: recipeName,
+        segmentation,
       });
       onMeasurementDefinitionConfirmed(response.measurement_definition);
     });
@@ -123,6 +151,7 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
   function handleTargetFamilyChange(nextTargetFamily: TargetFamily) {
     setTargetFamily(nextTargetFamily);
     setRoi(defaultRois[nextTargetFamily]);
+    setSegmentation(defaultSegmentations[nextTargetFamily]);
     setDetection(null);
   }
 
@@ -166,6 +195,12 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
             previewUrl={previewUrl}
             roi={roi}
           />
+          {detection?.debug_overlay_url ? (
+            <section className="debug-overlay-panel" aria-label="Detection debug overlay">
+              <h2>Debug mask / component / contour</h2>
+              <img alt="Detection debug overlay" src={detection.debug_overlay_url} />
+            </section>
+          ) : null}
         </section>
 
         <aside className="setup-panel" aria-label="Setup controls">
@@ -193,6 +228,20 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
           <section className="panel-section">
             <h2>ROI</h2>
             <RoiEditor roi={roi} onChange={setRoi} />
+          </section>
+
+          <section className="panel-section">
+            <h2>Segmentation Debug</h2>
+            <p className="panel-note">
+              These controls only affect current setup detection and confirmed local recipe data.
+            </p>
+            <SegmentationControls
+              value={segmentation}
+              onChange={(nextSegmentation) => {
+                setSegmentation(nextSegmentation);
+                setDetection(null);
+              }}
+            />
           </section>
 
           <section className="panel-section">

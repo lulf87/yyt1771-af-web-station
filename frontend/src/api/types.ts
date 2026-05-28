@@ -85,6 +85,7 @@ export interface SetupDetectRequest {
   roi: RotatedRoi;
   target_family: TargetFamily;
   recipe_name: string;
+  segmentation?: SegmentationParams | null;
 }
 
 export interface SetupDetectResponse {
@@ -98,6 +99,17 @@ export interface SetupDetectResponse {
   detector?: string;
   frame_ref?: FrameRef | null;
   diagnostics: Record<string, unknown>;
+  debug_overlay_url?: string | null;
+}
+
+export interface SegmentationParams {
+  polarity: "auto" | "dark_on_light" | "light_on_dark";
+  threshold_mode: "otsu" | "adaptive" | "fixed";
+  threshold_value: number | null;
+  blur_kernel: number;
+  close_kernel: number;
+  open_kernel: number;
+  min_component_area_px: number;
 }
 
 export interface FramePreviewMetadata {
@@ -120,6 +132,7 @@ export interface MeasurementDefinition {
   target_family: TargetFamily;
   roi: RotatedRoi;
   recipe_name: string;
+  segmentation?: SegmentationParams | null;
   detector_version: string;
   acquisition_frame_size: {
     width: number;
@@ -134,6 +147,7 @@ export interface SetupConfirmRequest {
   target_family: TargetFamily;
   roi: RotatedRoi;
   recipe_name: string;
+  segmentation?: SegmentationParams | null;
 }
 
 export interface SetupConfirmResponse {

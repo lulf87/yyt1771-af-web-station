@@ -165,7 +165,8 @@ class RunService:
                 frame=frame.image,
                 roi=measurement_definition.roi,
                 target_family=measurement_definition.target_family,
-                segmentation=_segmentation_for_target(
+                segmentation=measurement_definition.segmentation
+                or _segmentation_for_target(
                     measurement_definition.target_family,
                     measurement_definition.recipe_name,
                 ),
