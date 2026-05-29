@@ -33,60 +33,64 @@ Do not create a third public detector in the initial version.
 
 Both target-specific detectors may share small geometry helper functions for projection, ROI-local transforms, and contour-contact scoring. Shared helpers are allowed, but the product behavior, recipes, tests, and diagnostics must be expressed through the two target-specific detectors only.
 
-## A/B point definition
+## ROI and A/B point definition
 
-A/B points are contour contact points selected inside the current rotated ROI.
+The ROI is the main geometry window confirmed during setup and used during live run. It is a rotatable rectangle in `acquisition` coordinates, defined by `center_x`, `center_y`, `width`, `height`, and `angle_deg`.
 
-Given:
+`roi.angle_deg` defines the ROI local x-axis. This local x-axis is the formal measurement direction. The ROI local y-axis is perpendicular to the ROI local x-axis.
 
-- a current frame
-- a rotated ROI
-- one of the two target families
-- a measurement direction from the ROI angle
+A ROI-local measurement line is a line with `y = constant` in the ROI local coordinate system. Its direction is strictly parallel to the ROI local x-axis.
 
-The selected target-specific detector extracts the valid external contour of the target inside the ROI. It then finds the two opposite support sides of that contour along the ROI measurement direction.
+Formal A/B must come from the same ROI-local measurement line:
 
-- Point A is the contour contact point on the smaller projection side.
-- Point B is the contour contact point on the larger projection side.
+- `A_local.y == B_local.y`.
+- Discrete pixel implementations may allow only a very small tolerance, such as `<= 1 px`.
+- The A/B line must be strictly parallel to the ROI local x-axis.
+- Do not describe this as "roughly parallel", "mostly parallel", or "usually close".
 
-A/B points must lie on valid target contour points.
+A/B are formal measurement points in `acquisition` coordinates. They are not display-coordinate points.
+
+A/B points must lie on valid target contour or scanline boundary points selected by the target-specific detector.
 
 A/B points must not be:
 
 - ROI box corners
 - axis-aligned bounding-box corners
 - display-coordinate points
-- pure mathematical projection points without contour support
+- ROI frame-edge points created by cropping
+- pure mathematical projection points without contour or scanline boundary support
 - internal texture points
 - mesh-hole points
 - skeleton endpoints
 - manually drawn points
+- algorithm helper points
+- rejected/debug candidates
 
-## Measurement direction rule
+Rejected/debug candidates may appear only in diagnostics. They must never be promoted to formal A/B.
 
-Let `u` be the ROI measurement direction derived from `roi.angle_deg`.
+## Measurement line rule
 
-For each valid contour point `p`, compute projection:
+Each detector must choose A/B by evaluating ROI-local measurement lines, not by independently choosing minimum and maximum projection support points.
 
-```text
-s = dot(p, u)
-```
+For each candidate measurement line:
 
-The smaller-projection and larger-projection support sides define the two candidate contact regions.
+- sample or intersect the detector-selected foreground/contour along one `y = constant` ROI-local line;
+- identify object intervals on that line;
+- validate the target-specific pattern;
+- select A/B from the required interval boundaries;
+- reject the frame if the line contact is caused by ROI cropping or the pattern is not trustworthy.
 
-Each target-specific detector chooses actual contour contact points near those two support sides and returns them as A/B.
-
-The selected A/B points should be stable over time. If several candidate contacts are equally plausible, return `caliper_contact_ambiguous` unless temporal tracking can resolve the choice safely.
+The selected A/B points should be stable over time. If several measurement lines or interval patterns are equally plausible, return `caliper_contact_ambiguous` unless temporal tracking can resolve the choice safely.
 
 ## ROI requirement
 
 The ROI does not need to contain the physical endpoints of a wire-like sample.
 
-The ROI must contain enough visible object contour to identify the two opposing contour sides in the measurement direction.
+The ROI must contain enough visible object contour along one or more ROI-local measurement lines to identify the required target pattern.
 
 Invalid cases include:
 
-- only one side of the contour is visible
+- the required object interval pattern is not present
 - the contact point is created by ROI cropping rather than the object boundary
 - the target touches the ROI boundary in the measurement direction
 - the foreground is fragmented so no valid external contour can be selected
@@ -108,7 +112,9 @@ A balloon envelope target is treated as one whole external envelope. Internal me
 A/B rule:
 
 ```text
-A/B are ROI-direction contour contact points on the external envelope contour.
+The formal pattern is blank - object - blank.
+
+A/B are the left and right real contour/scanline boundary contacts of the object/envelope on the same ROI-local measurement line.
 ```
 
 Expected preprocessing:
@@ -152,7 +158,12 @@ A wire/strip target is a visible thin or elongated object inside the ROI. The de
 A/B rule:
 
 ```text
-A/B are ROI-direction contour contact points on the visible strip contour inside the ROI.
+The formal pattern is blank - object - blank - object - blank.
+
+The default measurement mode is outer-to-outer.
+
+A is the left outer contour/scanline boundary of the first object interval on the selected ROI-local measurement line.
+B is the right outer contour/scanline boundary of the second object interval on the same ROI-local measurement line.
 ```
 
 Important:
@@ -160,7 +171,8 @@ Important:
 - Do not search for whole-wire physical endpoints.
 - Do not skeletonize for endpoint detection in the initial version.
 - Do not return `wire_endpoint_missing`; that status is not part of this project.
-- ROI may contain only a section of the wire/strip if both opposing contour sides are visible.
+- Do not measure the inner gap unless a future `inner_to_inner` mode is explicitly defined.
+- A line with only one object interval is invalid for `wire_strip`.
 
 Common failure reasons:
 
@@ -171,6 +183,8 @@ Common failure reasons:
 - `caliper_contact_ambiguous`
 - `caliper_contact_on_roi_boundary`
 - `points_not_on_contour`
+- `pattern_not_found`
+- `object_interval_count_mismatch`
 - `jump_exceeds_limit`
 
 Diagnostics must report detector identity as:
@@ -245,8 +259,30 @@ A detection result may include diagnostic data:
 - contour point count
 - mask area
 - number of candidate components
-- projection values for A/B
+- ROI-local measurement line y
+- ROI-local A/B coordinates
+- local-y delta and parallel error
+- chord length
+- pattern model and detected pattern
+- selected object intervals
 - ROI-local A/B coordinates
 - failure reason details
 
 Diagnostic images can be stored later, but the API contract should not require them for MVP.
+
+## Live Run Rule
+
+During live run, the confirmed setup ROI and recipe are locked by default.
+
+Each frame must re-detect A/B using:
+
+- the same ROI,
+- the same target family,
+- the same public detector,
+- the same detector mode,
+- the same segmentation and detector recipe snapshot,
+- the same measurement model and measurement mode.
+
+The run stage must not freely switch threshold, contact source, envelope mode, measurement model, or measurement mode from frame to frame. If a future limited compensation feature is added, it must be explicitly designed and recorded.
+
+If the current frame cannot be measured reliably, return an invalid status. Do not fabricate A/B points.

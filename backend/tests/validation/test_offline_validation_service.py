@@ -88,6 +88,12 @@ def test_offline_validation_runner_writes_manifest_samples_summary_and_curves(
     assert summary["mean_processing_ms"] is not None
     assert summary["effective_processing_fps"] is not None
     assert summary["point_a_jump_px_mean"] is not None
+    assert summary["local_y_delta_px_max"] is not None
+    assert summary["local_y_delta_px_max"] <= 1.0
+    assert summary["parallel_error_px_max"] is not None
+    assert summary["parallel_error_px_max"] <= 1.0
+    assert summary["pattern_mismatch_count"] >= 0
+    assert summary["object_interval_count_histogram"]
     assert summary["top_jump_frames"]
 
     sample_lines = (
@@ -100,6 +106,8 @@ def test_offline_validation_runner_writes_manifest_samples_summary_and_curves(
     assert first_sample["relative_time_s"] == 0.0
     assert first_sample["point_a"]["coordinate_space"] == "acquisition"
     assert first_sample["distance_px"] is not None
+    assert first_sample["diagnostics"]["measurement_line_y"] is not None
+    assert first_sample["diagnostics"]["parallel_error_px"] <= 1.0
 
 
 def test_offline_validation_records_invalid_frames_without_fake_distance(tmp_path: Path) -> None:

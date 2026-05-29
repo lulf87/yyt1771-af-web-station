@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -85,10 +85,20 @@ class ComponentBBox(BaseModel):
     max_y: int
 
 
+class ObjectInterval(BaseModel):
+    start_local_x: float
+    end_local_x: float
+    width_px: float
+    line_y: float | None = None
+
+
 class BalloonEnvelopeDetectorParams(BaseModel):
     detector_kind: Literal[DetectorKind.BALLOON_ENVELOPE_DETECTOR] = (
         DetectorKind.BALLOON_ENVELOPE_DETECTOR
     )
+    envelope_mode: Literal["solid_balloon", "open_mesh"] = "solid_balloon"
+    contact_source: Literal["raw_foreground", "bridged_foreground", "filled_envelope"] | None = None
+    measurement_model: Literal["blank_object_blank"] = "blank_object_blank"
     min_quality: float = Field(default=0.65, ge=0.0, le=1.0)
     max_point_jump_px: float | None = Field(default=25.0, gt=0.0)
     reject_contact_on_roi_boundary: bool = True
@@ -97,9 +107,28 @@ class BalloonEnvelopeDetectorParams(BaseModel):
     fill_internal_holes: bool = True
     bridge_mesh_gaps: bool = True
 
+    @model_validator(mode="before")
+    @classmethod
+    def apply_mode_defaults(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        mode = payload.get("envelope_mode", "solid_balloon")
+        if mode == "open_mesh":
+            payload.setdefault("contact_source", "bridged_foreground")
+            payload.setdefault("fill_internal_holes", False)
+        else:
+            payload.setdefault("contact_source", "filled_envelope")
+            payload.setdefault("fill_internal_holes", True)
+        return payload
+
 
 class WireStripDetectorParams(BaseModel):
     detector_kind: Literal[DetectorKind.WIRE_STRIP_DETECTOR] = DetectorKind.WIRE_STRIP_DETECTOR
+    measurement_model: Literal["blank_object_blank_object_blank"] = (
+        "blank_object_blank_object_blank"
+    )
+    measurement_mode: Literal["outer_to_outer"] = "outer_to_outer"
     min_quality: float = Field(default=0.60, ge=0.0, le=1.0)
     max_point_jump_px: float | None = Field(default=20.0, gt=0.0)
     reject_contact_on_roi_boundary: bool = True
@@ -107,6 +136,12 @@ class WireStripDetectorParams(BaseModel):
     require_physical_endpoints: Literal[False] = False
     skeleton_endpoint_detection: Literal[False] = False
     preserve_visible_strip_contour: bool = True
+
+
+DetectorParams = Annotated[
+    BalloonEnvelopeDetectorParams | WireStripDetectorParams,
+    Field(discriminator="detector_kind"),
+]
 
 
 class BalloonEnvelopeRecipe(BaseModel):
@@ -134,6 +169,15 @@ MeasurementRecipe = Annotated[
 class DetectionDiagnostics(BaseModel):
     detector: DetectorKind
     detector_version: str = "v1"
+    envelope_mode: str | None = None
+    configured_contact_source: str | None = None
+    contact_source_used: str | None = None
+    actual_contact_source_area_ratio: float | None = None
+    threshold_mode: str | None = None
+    configured_polarity: str | None = None
+    close_kernel: int | None = None
+    open_kernel: int | None = None
+    min_component_area_px: int | None = None
     contour_area_px: float | None = None
     contour_point_count: int | None = None
     candidate_components: int | None = None
@@ -148,10 +192,22 @@ class DetectionDiagnostics(BaseModel):
     preferred_point_hit_light: bool | None = None
     raw_foreground_area_px: int | None = None
     raw_foreground_ratio: float | None = None
+    bridged_foreground_ratio: float | None = None
     morphology_foreground_area_px: int | None = None
     morphology_foreground_ratio: float | None = None
     filled_envelope_area_px: int | None = None
     filled_envelope_ratio: float | None = None
+    point_a_local: Point2D | None = None
+    point_b_local: Point2D | None = None
+    measurement_line_y: float | None = None
+    local_y_delta_px: float | None = None
+    parallel_error_px: float | None = None
+    chord_length_px: float | None = None
+    pattern_model: str | None = None
+    detected_pattern: str | None = None
+    object_interval_count: int | None = None
+    selected_intervals: list[ObjectInterval] | None = None
+    measurement_mode: str | None = None
     foreground_area_px: int | None = None
     foreground_area_ratio_in_roi: float | None = None
     selected_component_area_px: int | None = None
@@ -170,7 +226,6 @@ class DetectionDiagnostics(BaseModel):
     rejected_contact_side: str | None = None
     rejected_candidate_point_a: Point2D | None = None
     rejected_candidate_point_b: Point2D | None = None
-    contact_source_used: str | None = None
     fill_internal_holes_used: bool | None = None
     message: str | None = None
 
@@ -276,7 +331,8 @@ class MeasurementDefinition(BaseModel):
     target_family: TargetFamily
     roi: RotatedRoi
     recipe_name: str
-    segmentation: SegmentationParams | None = None
+    segmentation: SegmentationParams
+    detector: DetectorParams
     detector_version: str = "v1"
     acquisition_frame_size: AcquisitionFrameSize
     coordinate_space: CoordinateSpace = CoordinateSpace.ACQUISITION
@@ -288,6 +344,16 @@ class MeasurementDefinition(BaseModel):
         if value is not CoordinateSpace.ACQUISITION:
             raise ValueError("measurement definitions must be in acquisition coordinates")
         return value
+
+    @model_validator(mode="after")
+    def validate_detector_matches_target_family(self) -> MeasurementDefinition:
+        expected_detector = {
+            TargetFamily.BALLOON_ENVELOPE: DetectorKind.BALLOON_ENVELOPE_DETECTOR,
+            TargetFamily.WIRE_STRIP: DetectorKind.WIRE_STRIP_DETECTOR,
+        }[self.target_family]
+        if self.detector.detector_kind is not expected_detector:
+            raise ValueError("measurement detector params must match target_family")
+        return self
 
 
 class RunDefinition(BaseModel):

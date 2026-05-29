@@ -50,12 +50,14 @@ def _mock_setup_frame() -> np.ndarray:
     image[balloon_mask] = 30
 
     wire_center_x = 235.0
-    wire_center_y = 110.0
     wire_length = 105.0
-    wire_thickness = 18.0
-    wire_mask = (np.abs(x - wire_center_x) <= wire_length / 2.0) & (
-        np.abs(y - wire_center_y) <= wire_thickness / 2.0
-    )
+    wire_object_height = 8.0
+    upper_wire_y = 92.0
+    lower_wire_y = 128.0
+    wire_span = np.abs(x - wire_center_x) <= wire_length / 2.0
+    upper_wire = np.abs(y - upper_wire_y) <= wire_object_height / 2.0
+    lower_wire = np.abs(y - lower_wire_y) <= wire_object_height / 2.0
+    wire_mask = wire_span & (upper_wire | lower_wire)
     image[wire_mask] = 30
 
     return image

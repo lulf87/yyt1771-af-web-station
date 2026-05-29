@@ -51,6 +51,15 @@ def render_debug_overlay_png(
             (255, 214, 80),
             thickness=2,
         )
+        draw_text(
+            pixels,
+            width,
+            int(round(point_a.x)) + 8,
+            int(round(point_a.y)) - 10,
+            "FORMAL A/B",
+            (255, 214, 80),
+            scale=1,
+        )
 
     label_height = 52
     draw_rect(pixels, width, 0, 0, min(width - 1, 760), label_height, (0, 0, 0))
@@ -170,8 +179,16 @@ def render_detection_debug_overlay_png(
         scaled_roi,
         float(detection.diagnostics.boundary_margin_px or 0.0) * scale_x,
     )
+    _draw_measurement_line(
+        pixels,
+        display_width,
+        scaled_roi,
+        None
+        if detection.diagnostics.measurement_line_y is None
+        else float(detection.diagnostics.measurement_line_y) * scale_y,
+    )
 
-    if show_rejected_candidates:
+    if show_rejected_candidates and not detection.valid:
         _draw_point(
             pixels,
             display_width,
@@ -190,10 +207,28 @@ def render_detection_debug_overlay_png(
         )
     _draw_point(pixels, display_width, detection.point_a, scale_x, scale_y, (255, 80, 80))
     _draw_point(pixels, display_width, detection.point_b, scale_x, scale_y, (80, 220, 120))
+    if detection.point_a is not None and detection.point_b is not None:
+        draw_line(
+            pixels,
+            display_width,
+            int(round(detection.point_a.x * scale_x)),
+            int(round(detection.point_a.y * scale_y)),
+            int(round(detection.point_b.x * scale_x)),
+            int(round(detection.point_b.y * scale_y)),
+            (255, 214, 80),
+            thickness=2,
+        )
 
     draw_rect(pixels, display_width, 0, 0, min(display_width - 1, 900), 70, (0, 0, 0))
     status_text = detection.status.value
     polarity_text = detection.diagnostics.selected_polarity or "-"
+    pattern_text = detection.diagnostics.detected_pattern or "-"
+    source_text = detection.diagnostics.contact_source_used or "-"
+    model_text = detection.diagnostics.pattern_model or "-"
+    chord = detection.diagnostics.chord_length_px
+    chord_text = "-" if chord is None else f"{chord:.2f}"
+    parallel_error = detection.diagnostics.parallel_error_px
+    parallel_text = "-" if parallel_error is None else f"{parallel_error:.2f}"
     side_text = detection.diagnostics.rejected_contact_side or "-"
     right_distance = detection.diagnostics.distance_to_right_roi_boundary_px
     right_text = "-" if right_distance is None else f"{right_distance:.2f}"
@@ -202,16 +237,22 @@ def render_detection_debug_overlay_png(
         display_width,
         8,
         8,
-        f"STATUS:{status_text} POL:{polarity_text}",
+        f"STATUS:{status_text} POL:{polarity_text} SRC:{source_text}",
         (255, 255, 255),
         scale=2,
+    )
+    detail_text = (
+        f"FORMAL A/B MODEL:{model_text} PATTERN:{pattern_text} "
+        f"CHORD:{chord_text} PAR_ERR:{parallel_text}"
+        if detection.valid
+        else f"SIDE:{side_text} RIGHT_MARGIN:{right_text} REJECTED DEBUG CANDIDATES"
     )
     draw_text(
         pixels,
         display_width,
         8,
         34,
-        f"SIDE:{side_text} RIGHT_MARGIN:{right_text} REJECTED DEBUG",
+        detail_text,
         (255, 220, 120),
         scale=2,
     )
@@ -300,3 +341,29 @@ def _draw_boundary_margin_lines(
             (255, 230, 80),
             thickness=1,
         )
+
+
+def _draw_measurement_line(
+    pixels: bytearray,
+    width: int,
+    roi: RotatedRoi,
+    measurement_line_y: float | None,
+) -> None:
+    if measurement_line_y is None:
+        return
+    unit_x, unit_y = roi_measurement_direction(roi.angle_deg)
+    perp_x, perp_y = -unit_y, unit_x
+    x0 = roi.center_x - roi.width / 2.0 * unit_x + measurement_line_y * perp_x
+    y0 = roi.center_y - roi.width / 2.0 * unit_y + measurement_line_y * perp_y
+    x1 = roi.center_x + roi.width / 2.0 * unit_x + measurement_line_y * perp_x
+    y1 = roi.center_y + roi.width / 2.0 * unit_y + measurement_line_y * perp_y
+    draw_line(
+        pixels,
+        width,
+        int(round(x0)),
+        int(round(y0)),
+        int(round(x1)),
+        int(round(y1)),
+        (120, 255, 255),
+        thickness=1,
+    )

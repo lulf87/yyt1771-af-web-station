@@ -13,6 +13,7 @@ from yyt1771_af.core.models import (
     AcquisitionFrameSize,
     BalloonEnvelopeDetectorParams,
     DetectionResult,
+    DetectorParams,
     FrameRef,
     MeasurementDefinition,
     RotatedRoi,
@@ -59,6 +60,7 @@ class SetupDetectRequest(BaseModel):
     target_family: TargetFamily
     recipe_name: str
     segmentation: SegmentationParams | None = None
+    detector: DetectorParams | None = None
 
 
 class SetupDetectResponse(BaseModel):
@@ -80,6 +82,7 @@ class SetupConfirmRequest(BaseModel):
     roi: RotatedRoi
     recipe_name: str
     segmentation: SegmentationParams | None = None
+    detector: DetectorParams | None = None
 
 
 class SetupConfirmResponse(BaseModel):
@@ -114,7 +117,11 @@ class SetupService:
             request.target_family,
             request.recipe_name,
         )
-        detector_params = _detector_params_for_target(request.target_family, request.recipe_name)
+        detector_params = _detector_params_for_request(
+            request.target_family,
+            request.recipe_name,
+            request.detector,
+        )
         result = detect_target(
             frame=frame.image,
             roi=request.roi,
@@ -140,13 +147,23 @@ class SetupService:
 
     def confirm(self, request: SetupConfirmRequest) -> SetupConfirmResponse:
         frame = self._camera.current_frame()
+        segmentation = request.segmentation or _segmentation_for_target(
+            request.target_family,
+            request.recipe_name,
+        )
+        detector_params = _detector_params_for_request(
+            request.target_family,
+            request.recipe_name,
+            request.detector,
+        )
         measurement_definition = MeasurementDefinition(
             measurement_definition_id=f"md_{uuid4().hex[:12]}",
             name=request.name,
             target_family=request.target_family,
             roi=request.roi,
             recipe_name=request.recipe_name,
-            segmentation=request.segmentation,
+            segmentation=segmentation,
+            detector=detector_params,
             detector_version="v1",
             acquisition_frame_size=AcquisitionFrameSize(width=frame.width, height=frame.height),
             created_at_ms=time.time_ns() // 1_000_000,
@@ -220,6 +237,18 @@ def _detector_params_for_target(
     return load_detector_recipe_config(target_family, recipe_name).detector
 
 
+def _detector_params_for_request(
+    target_family: TargetFamily,
+    recipe_name: str | None,
+    detector: DetectorParams | None,
+) -> BalloonEnvelopeDetectorParams | WireStripDetectorParams:
+    detector_params = detector or _detector_params_for_target(target_family, recipe_name)
+    expected_kind = _detector_params_for_target(target_family, recipe_name).detector_kind
+    if detector_params.detector_kind is not expected_kind:
+        raise ValueError("detector params do not match target_family")
+    return detector_params
+
+
 def _serialize_detection_result(
     result: DetectionResult,
     *,
@@ -261,17 +290,20 @@ def _build_debug_artifact(
             preferred_point_xy=(roi.center_x, roi.center_y),
         )
         filled_envelope = fill_internal_holes(layers.morphology_foreground) & roi_mask
-        fill_internal_holes_used = (
-            detector_params.fill_internal_holes
+        contact_source = (
+            detector_params.contact_source
             if (
                 target_family is TargetFamily.BALLOON_ENVELOPE
                 and isinstance(detector_params, BalloonEnvelopeDetectorParams)
             )
-            else False
+            else "bridged_foreground"
         )
-        if segmentation.fill_internal_holes is not None:
-            fill_internal_holes_used = segmentation.fill_internal_holes
-        foreground = filled_envelope if fill_internal_holes_used else layers.morphology_foreground
+        if contact_source == "raw_foreground":
+            foreground = layers.raw_foreground
+        elif contact_source == "filled_envelope":
+            foreground = filled_envelope
+        else:
+            foreground = layers.morphology_foreground
         components = connected_components(foreground, segmentation.min_component_area_px)
         selected_component_mask = components[0].mask if components else None
         selected_contour_mask = (

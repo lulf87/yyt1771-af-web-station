@@ -24,6 +24,7 @@ from yyt1771_af.core.models import (
     BalloonEnvelopeDetectorParams,
     DetectionDiagnostics,
     DetectionResult,
+    DetectorParams,
     Point2D,
     RotatedRoi,
     SegmentationParams,
@@ -62,6 +63,8 @@ class OfflineValidationRequest:
     overlay_policy: OverlayPolicy = field(default_factory=OverlayPolicy)
     dataset_label: str | None = None
     recipe_name: str | None = None
+    segmentation: SegmentationParams | None = None
+    detector: DetectorParams | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,7 +190,14 @@ def run_offline_validation(request: OfflineValidationRequest) -> OfflineValidati
         frame_height=first_frame.shape[0] - 1,
     ):
         raise ValueError("ROI is outside first frame bounds")
-    recipe = load_detector_recipe_config(request.target_family, request.recipe_name)
+    recipe_segmentation, recipe_detector = _recipe_from_request(request)
+    recipe_snapshot = _recipe_snapshot(
+        target_family=request.target_family,
+        roi=request.roi,
+        segmentation=recipe_segmentation,
+        detector=recipe_detector,
+        recipe_name=request.recipe_name,
+    )
 
     samples: list[dict[str, Any]] = []
     start_time = time.perf_counter()
@@ -211,8 +221,8 @@ def run_offline_validation(request: OfflineValidationRequest) -> OfflineValidati
                 relative_time_s=frame_index / request.fps,
                 target_family=request.target_family,
                 roi=request.roi,
-                segmentation=recipe.segmentation,
-                params=recipe.detector,
+                segmentation=recipe_segmentation,
+                params=recipe_detector,
             )
             samples.append(sample)
             jsonl_handle.write(json.dumps(sample, separators=(",", ":")) + "\n")
@@ -226,6 +236,7 @@ def run_offline_validation(request: OfflineValidationRequest) -> OfflineValidati
         samples=samples,
         elapsed_s=elapsed_s,
         point_jump_summary=point_jump_summary,
+        recipe_snapshot=recipe_snapshot,
     )
     _write_json(output_dir / "evaluation_summary.json", summary)
     _write_json(output_dir / "point_jump_summary.json", point_jump_summary)
@@ -303,8 +314,40 @@ def _evaluate_frame(
         "distance_px": result.distance_px,
         "quality": result.quality,
         "reason": reason,
+        "diagnostics": result.diagnostics.model_dump(mode="json", exclude_none=True),
         "processing_ms": round(processing_ms, 6),
     }
+
+
+def _recipe_from_request(
+    request: OfflineValidationRequest,
+) -> tuple[SegmentationParams, DetectorParams]:
+    configured_recipe = load_detector_recipe_config(request.target_family, request.recipe_name)
+    segmentation = request.segmentation or configured_recipe.segmentation
+    detector = request.detector or configured_recipe.detector
+    if detector.detector_kind is not _detector_kind(request.target_family):
+        raise ValueError("detector params do not match target_family")
+    return segmentation, detector
+
+
+def _recipe_snapshot(
+    *,
+    target_family: TargetFamily,
+    roi: RotatedRoi,
+    segmentation: SegmentationParams,
+    detector: DetectorParams,
+    recipe_name: str | None,
+) -> dict[str, Any]:
+    return sanitize_path_metadata(
+        {
+            "name": recipe_name,
+            "target_family": target_family.value,
+            "roi": roi.model_dump(mode="json"),
+            "segmentation": segmentation.model_dump(mode="json"),
+            "detector": detector.model_dump(mode="json"),
+            "detector_version": "v1",
+        }
+    )
 
 
 def _detector_kind(target_family: TargetFamily) -> DetectorKind:
@@ -419,6 +462,7 @@ def _summary(
     samples: list[dict[str, Any]],
     elapsed_s: float,
     point_jump_summary: dict[str, Any],
+    recipe_snapshot: dict[str, Any],
 ) -> dict[str, Any]:
     status_counts = dict(sorted(Counter(sample["status"] for sample in samples).items()))
     failure_reasons = Counter(
@@ -429,6 +473,22 @@ def _summary(
     ]
     distances = [float(sample["distance_px"]) for sample in valid_samples]
     processing_times = [float(sample["processing_ms"]) for sample in samples]
+    local_y_deltas = _diagnostic_values(valid_samples, "local_y_delta_px")
+    parallel_errors = _diagnostic_values(valid_samples, "parallel_error_px")
+    pattern_mismatch_count = sum(
+        1
+        for sample in samples
+        if _diagnostic_value(sample, "pattern_model") is not None
+        and _diagnostic_value(sample, "detected_pattern")
+        != _diagnostic_value(sample, "pattern_model")
+    )
+    interval_histogram = dict(
+        sorted(
+            Counter(
+                str(int(value)) for value in _diagnostic_values(samples, "object_interval_count")
+            ).items()
+        )
+    )
     processed_frames = len(samples)
     valid_frames = len(valid_samples)
     invalid_frames = processed_frames - valid_frames
@@ -454,8 +514,17 @@ def _summary(
             "distance_px_max": _max_or_none(distances),
             "distance_px_mean": _mean_or_none(distances),
             "distance_px_std": round(pstdev(distances), 6) if len(distances) >= 2 else None,
+            "local_y_delta_px_mean": _mean_or_none(local_y_deltas),
+            "local_y_delta_px_p95": _p95_or_none(local_y_deltas),
+            "local_y_delta_px_max": _max_or_none(local_y_deltas),
+            "parallel_error_px_mean": _mean_or_none(parallel_errors),
+            "parallel_error_px_p95": _p95_or_none(parallel_errors),
+            "parallel_error_px_max": _max_or_none(parallel_errors),
+            "pattern_mismatch_count": pattern_mismatch_count,
+            "object_interval_count_histogram": interval_histogram,
             **{key: point_jump_summary[key] for key in point_jump_summary if key != "reason"},
             "statistics_reason": point_jump_summary["reason"],
+            "recipe_snapshot": recipe_snapshot,
             "artifacts": {
                 "manifest": "evaluation_manifest.json",
                 "samples_csv": "evaluation_samples.csv",
@@ -476,6 +545,22 @@ def _point_distance(a: dict[str, Any], b: dict[str, Any]) -> float:
         Point2D(x=float(a["x"]), y=float(a["y"])),
         Point2D(x=float(b["x"]), y=float(b["y"])),
     )
+
+
+def _diagnostic_value(sample: dict[str, Any], key: str) -> Any:
+    diagnostics = sample.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        return None
+    return diagnostics.get(key)
+
+
+def _diagnostic_values(samples: list[dict[str, Any]], key: str) -> list[float]:
+    values: list[float] = []
+    for sample in samples:
+        value = _diagnostic_value(sample, key)
+        if isinstance(value, int | float):
+            values.append(float(value))
+    return values
 
 
 def _mean_or_none(values: list[float]) -> float | None:

@@ -129,6 +129,70 @@ def test_setup_detect_accepts_segmentation_override_and_serves_debug_overlay() -
     assert overlay_response.content.startswith(b"\x89PNG")
 
 
+def test_setup_detect_and_confirm_accept_complete_open_mesh_recipe_snapshot() -> None:
+    client = TestClient(app)
+    client.post("/api/camera/open", json={"profile": "dev_mock"})
+    frame_ref = client.post("/api/setup/freeze", json={"source": "latest"}).json()["frame_ref"]
+    recipe_payload = {
+        "frame_ref": frame_ref,
+        "roi": {
+            "center_x": 110.0,
+            "center_y": 110.0,
+            "width": 130.0,
+            "height": 80.0,
+            "angle_deg": 0.0,
+            "coordinate_space": "acquisition",
+        },
+        "target_family": "balloon_envelope",
+        "recipe_name": "open_mesh_setup",
+        "segmentation": {
+            "polarity": "dark_on_light",
+            "threshold_mode": "fixed",
+            "threshold_value": 160,
+            "blur_kernel": 3,
+            "close_kernel": 7,
+            "open_kernel": 1,
+            "min_component_area_px": 50,
+            "fill_internal_holes": False,
+        },
+        "detector": {
+            "detector_kind": "balloon_envelope_detector",
+            "envelope_mode": "open_mesh",
+            "contact_source": "bridged_foreground",
+            "min_quality": 0.65,
+            "reject_contact_on_roi_boundary": True,
+            "boundary_margin_px": 4.0,
+            "max_point_jump_px": 25.0,
+            "ignore_internal_texture": True,
+            "fill_internal_holes": False,
+            "bridge_mesh_gaps": True,
+        },
+    }
+
+    detect_response = client.post("/api/setup/detect", json=recipe_payload)
+    assert detect_response.status_code == 200
+    diagnostics = detect_response.json()["diagnostics"]
+    assert diagnostics["envelope_mode"] == "open_mesh"
+    assert diagnostics["configured_contact_source"] == "bridged_foreground"
+    assert diagnostics["contact_source_used"] == "bridged_foreground"
+    assert (
+        diagnostics["actual_contact_source_area_ratio"] == diagnostics["bridged_foreground_ratio"]
+    )
+
+    confirm_payload = recipe_payload.copy()
+    confirm_payload.pop("frame_ref")
+    confirm_payload["name"] = "open-mesh-run"
+    confirm_response = client.post("/api/setup/confirm", json=confirm_payload)
+
+    assert confirm_response.status_code == 200
+    measurement_definition = confirm_response.json()["measurement_definition"]
+    assert measurement_definition["segmentation"]["threshold_mode"] == "fixed"
+    assert measurement_definition["segmentation"]["threshold_value"] == 160
+    assert measurement_definition["detector"]["envelope_mode"] == "open_mesh"
+    assert measurement_definition["detector"]["contact_source"] == "bridged_foreground"
+    assert measurement_definition["detector"]["boundary_margin_px"] == 4.0
+
+
 def test_setup_detect_returns_backend_ab_points_for_wire_recipe() -> None:
     client = TestClient(app)
     client.post("/api/camera/open", json={"profile": "dev_mock"})
@@ -159,7 +223,9 @@ def test_setup_detect_returns_backend_ab_points_for_wire_recipe() -> None:
     assert payload["detector"] == "wire_strip_detector:v1"
     assert payload["point_a"]["coordinate_space"] == "acquisition"
     assert payload["point_b"]["coordinate_space"] == "acquisition"
-    assert 15.0 <= payload["distance_px"] <= 24.0
+    assert 40.0 <= payload["distance_px"] <= 50.0
+    assert payload["diagnostics"]["measurement_mode"] == "outer_to_outer"
+    assert payload["diagnostics"]["object_interval_count"] == 2
 
 
 def test_offline_camera_open_reads_pgm_image_folder(

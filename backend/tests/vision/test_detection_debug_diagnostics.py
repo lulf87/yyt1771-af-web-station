@@ -96,6 +96,24 @@ def test_fill_internal_holes_reports_raw_morphology_and_filled_area_ratios() -> 
     assert diagnostics.contact_source_used == "filled_envelope"
 
 
+def test_open_mesh_defaults_to_bridged_foreground_contact_source() -> None:
+    result = BalloonEnvelopeDetector().detect(
+        frame=_mesh_frame_with_bright_center(),
+        roi=RotatedRoi(center_x=80.0, center_y=60.0, width=120.0, height=82.0, angle_deg=0.0),
+        segmentation=None,
+        params=BalloonEnvelopeDetectorParams(envelope_mode="open_mesh"),
+    )
+
+    diagnostics = result.diagnostics
+    assert diagnostics.envelope_mode == "open_mesh"
+    assert diagnostics.configured_contact_source == "bridged_foreground"
+    assert diagnostics.contact_source_used == "bridged_foreground"
+    assert diagnostics.fill_internal_holes_used is False
+    assert diagnostics.threshold_value == 160
+    assert diagnostics.selected_polarity == "dark_on_light"
+    assert diagnostics.actual_contact_source_area_ratio == diagnostics.bridged_foreground_ratio
+
+
 def test_boundary_rejection_keeps_formal_points_empty_but_records_debug_candidates() -> None:
     result = BalloonEnvelopeDetector().detect(
         frame=_ellipse_frame(),
@@ -124,3 +142,26 @@ def test_boundary_rejection_keeps_formal_points_empty_but_records_debug_candidat
     assert diagnostics.rejected_candidate_point_b is not None
     assert diagnostics.rejected_candidate_point_a.coordinate_space is CoordinateSpace.ACQUISITION
     assert diagnostics.rejected_candidate_point_b.coordinate_space is CoordinateSpace.ACQUISITION
+
+
+def test_open_mesh_boundary_rejection_keeps_rejected_candidates_debug_only() -> None:
+    result = BalloonEnvelopeDetector().detect(
+        frame=_ellipse_frame(),
+        roi=RotatedRoi(center_x=80.0, center_y=60.0, width=72.0, height=60.0, angle_deg=0.0),
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=5,
+            open_kernel=1,
+        ),
+        params=BalloonEnvelopeDetectorParams(envelope_mode="open_mesh"),
+    )
+
+    assert result.status is DetectionStatus.CALIPER_CONTACT_ON_ROI_BOUNDARY
+    assert result.valid is False
+    assert result.point_a is None
+    assert result.point_b is None
+    assert result.distance_px is None
+    assert result.diagnostics.rejected_candidate_point_a is not None
+    assert result.diagnostics.rejected_candidate_point_b is not None

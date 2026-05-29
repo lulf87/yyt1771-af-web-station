@@ -150,7 +150,20 @@ Request:
     "blur_kernel": 3,
     "close_kernel": 11,
     "open_kernel": 3,
-    "min_component_area_px": 500
+    "min_component_area_px": 500,
+    "fill_internal_holes": true
+  },
+  "detector": {
+    "detector_kind": "balloon_envelope_detector",
+    "envelope_mode": "solid_balloon",
+    "contact_source": "filled_envelope",
+    "min_quality": 0.65,
+    "max_point_jump_px": 25.0,
+    "reject_contact_on_roi_boundary": true,
+    "boundary_margin_px": 4.0,
+    "ignore_internal_texture": true,
+    "fill_internal_holes": true,
+    "bridge_mesh_gaps": true
   }
 }
 ```
@@ -171,6 +184,10 @@ Successful response:
   "diagnostics": {
     "contour_area_px": 123456.0,
     "candidate_components": 1,
+    "envelope_mode": "solid_balloon",
+    "configured_contact_source": "filled_envelope",
+    "contact_source_used": "filled_envelope",
+    "actual_contact_source_area_ratio": 0.62,
     "threshold_value": 196,
     "selected_polarity": "auto_dark_selected",
     "selected_reason": "preferred_point_dark",
@@ -187,7 +204,6 @@ Successful response:
     "right_margin_px": 0.54,
     "top_margin_px": 12.3,
     "bottom_margin_px": 1.2,
-    "contact_source_used": "filled_envelope",
     "fill_internal_holes_used": true
   }
 }
@@ -244,7 +260,27 @@ Request:
     "angle_deg": 12.0,
     "coordinate_space": "acquisition"
   },
-  "recipe_name": "wire_strip_default"
+  "recipe_name": "wire_strip_default",
+  "segmentation": {
+    "polarity": "auto",
+    "threshold_mode": "adaptive",
+    "threshold_value": null,
+    "blur_kernel": 3,
+    "close_kernel": 5,
+    "open_kernel": 3,
+    "min_component_area_px": 80,
+    "fill_internal_holes": false
+  },
+  "detector": {
+    "detector_kind": "wire_strip_detector",
+    "min_quality": 0.6,
+    "max_point_jump_px": 20.0,
+    "reject_contact_on_roi_boundary": true,
+    "boundary_margin_px": 3.0,
+    "require_physical_endpoints": false,
+    "skeleton_endpoint_detection": false,
+    "preserve_visible_strip_contour": true
+  }
 }
 ```
 
@@ -252,8 +288,21 @@ Response:
 
 ```json
 {
-  "recipe_id": "recipe_001",
-  "saved": true
+  "measurement_definition_id": "md_abc123",
+  "saved": true,
+  "measurement_definition": {
+    "measurement_definition_id": "md_abc123",
+    "name": "run_recipe_001",
+    "target_family": "wire_strip",
+    "roi": {"center_x": 1000.0, "center_y": 680.0, "width": 800.0, "height": 260.0, "angle_deg": 12.0, "coordinate_space": "acquisition"},
+    "recipe_name": "wire_strip_default",
+    "segmentation": {"polarity": "auto", "threshold_mode": "adaptive", "threshold_value": null, "blur_kernel": 3, "close_kernel": 5, "open_kernel": 3, "min_component_area_px": 80, "fill_internal_holes": false},
+    "detector": {"detector_kind": "wire_strip_detector", "min_quality": 0.6, "max_point_jump_px": 20.0, "reject_contact_on_roi_boundary": true, "boundary_margin_px": 3.0, "require_physical_endpoints": false, "skeleton_endpoint_detection": false, "preserve_visible_strip_contour": true},
+    "detector_version": "v1",
+    "acquisition_frame_size": {"width": 2048, "height": 1364},
+    "coordinate_space": "acquisition",
+    "created_at_ms": 123456789
+  }
 }
 ```
 

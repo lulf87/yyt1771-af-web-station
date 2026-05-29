@@ -32,6 +32,8 @@ export type DetectionStatus =
   | "contour_fragmented"
   | "internal_texture_selected"
   | "points_not_on_contour"
+  | "pattern_not_found"
+  | "object_interval_count_mismatch"
   | "quality_below_threshold"
   | "jump_exceeds_limit"
   | "coordinate_mapping_error"
@@ -86,6 +88,7 @@ export interface SetupDetectRequest {
   target_family: TargetFamily;
   recipe_name: string;
   segmentation?: SegmentationParams | null;
+  detector?: DetectorParams | null;
 }
 
 export interface SetupDetectResponse {
@@ -113,6 +116,38 @@ export interface SegmentationParams {
   fill_internal_holes?: boolean | null;
 }
 
+export type EnvelopeMode = "solid_balloon" | "open_mesh";
+export type ContactSource = "raw_foreground" | "bridged_foreground" | "filled_envelope";
+
+export interface BalloonEnvelopeDetectorParams {
+  detector_kind: "balloon_envelope_detector";
+  envelope_mode: EnvelopeMode;
+  contact_source: ContactSource;
+  measurement_model: "blank_object_blank";
+  min_quality: number;
+  max_point_jump_px: number | null;
+  reject_contact_on_roi_boundary: boolean;
+  boundary_margin_px: number;
+  ignore_internal_texture: boolean;
+  fill_internal_holes: boolean;
+  bridge_mesh_gaps: boolean;
+}
+
+export interface WireStripDetectorParams {
+  detector_kind: "wire_strip_detector";
+  measurement_model: "blank_object_blank_object_blank";
+  measurement_mode: "outer_to_outer";
+  min_quality: number;
+  max_point_jump_px: number | null;
+  reject_contact_on_roi_boundary: boolean;
+  boundary_margin_px: number;
+  require_physical_endpoints: false;
+  skeleton_endpoint_detection: false;
+  preserve_visible_strip_contour: boolean;
+}
+
+export type DetectorParams = BalloonEnvelopeDetectorParams | WireStripDetectorParams;
+
 export interface FramePreviewMetadata {
   frame_id: number | null;
   frame_index: number | null;
@@ -133,7 +168,8 @@ export interface MeasurementDefinition {
   target_family: TargetFamily;
   roi: RotatedRoi;
   recipe_name: string;
-  segmentation?: SegmentationParams | null;
+  segmentation: SegmentationParams;
+  detector: DetectorParams;
   detector_version: string;
   acquisition_frame_size: {
     width: number;
@@ -149,6 +185,7 @@ export interface SetupConfirmRequest {
   roi: RotatedRoi;
   recipe_name: string;
   segmentation?: SegmentationParams | null;
+  detector?: DetectorParams | null;
 }
 
 export interface SetupConfirmResponse {

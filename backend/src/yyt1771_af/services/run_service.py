@@ -15,11 +15,7 @@ from yyt1771_af.core.models import (
 )
 from yyt1771_af.core.statuses import DetectionStatus
 from yyt1771_af.services.camera_service import CameraService, camera_service
-from yyt1771_af.services.setup_service import (
-    _detector_params_for_target,
-    _segmentation_for_target,
-    setup_service,
-)
+from yyt1771_af.services.setup_service import setup_service
 from yyt1771_af.services.temperature_service import TemperatureService, temperature_service
 from yyt1771_af.storage.run_store import RunArtifactStore, run_artifact_store
 from yyt1771_af.vision.detection import detect_target
@@ -153,10 +149,7 @@ class RunService:
                 target_family=measurement_definition.target_family,
                 frame_ref=frame_ref,
                 diagnostics=DetectionDiagnostics(
-                    detector=_detector_params_for_target(
-                        measurement_definition.target_family,
-                        measurement_definition.recipe_name,
-                    ).detector_kind,
+                    detector=measurement_definition.detector.detector_kind,
                     message="Frame dimensions differ from the confirmed measurement definition.",
                 ),
             )
@@ -165,15 +158,8 @@ class RunService:
                 frame=frame.image,
                 roi=measurement_definition.roi,
                 target_family=measurement_definition.target_family,
-                segmentation=measurement_definition.segmentation
-                or _segmentation_for_target(
-                    measurement_definition.target_family,
-                    measurement_definition.recipe_name,
-                ),
-                params=_detector_params_for_target(
-                    measurement_definition.target_family,
-                    measurement_definition.recipe_name,
-                ),
+                segmentation=measurement_definition.segmentation,
+                params=measurement_definition.detector,
             )
             detection.frame_ref = frame_ref
 

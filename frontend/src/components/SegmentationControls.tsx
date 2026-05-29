@@ -1,8 +1,10 @@
-import type { SegmentationParams } from "../api/types";
+import type { BalloonEnvelopeDetectorParams, DetectorParams, SegmentationParams } from "../api/types";
 
 interface SegmentationControlsProps {
   value: SegmentationParams;
   onChange: (value: SegmentationParams) => void;
+  detector: DetectorParams;
+  onDetectorChange: (value: DetectorParams) => void;
 }
 
 const numericFields: Array<{
@@ -16,7 +18,12 @@ const numericFields: Array<{
   { key: "min_component_area_px", label: "Min area", min: 1 },
 ];
 
-export function SegmentationControls({ value, onChange }: SegmentationControlsProps) {
+export function SegmentationControls({
+  value,
+  onChange,
+  detector,
+  onDetectorChange,
+}: SegmentationControlsProps) {
   function updateNumber(key: (typeof numericFields)[number]["key"], rawValue: string) {
     const parsed = Number(rawValue);
     if (!Number.isFinite(parsed)) {
@@ -30,6 +37,9 @@ export function SegmentationControls({ value, onChange }: SegmentationControlsPr
 
   return (
     <div className="segmentation-controls">
+      {detector.detector_kind === "balloon_envelope_detector" ? (
+        <BalloonDetectorControls detector={detector} onDetectorChange={onDetectorChange} />
+      ) : null}
       <label className="inline-check">
         <input
           checked={value.fill_internal_holes ?? false}
@@ -93,5 +103,49 @@ export function SegmentationControls({ value, onChange }: SegmentationControlsPr
         ))}
       </div>
     </div>
+  );
+}
+
+function BalloonDetectorControls({
+  detector,
+  onDetectorChange,
+}: {
+  detector: BalloonEnvelopeDetectorParams;
+  onDetectorChange: (value: DetectorParams) => void;
+}) {
+  return (
+    <>
+      <label className="stacked-field">
+        <span>Envelope mode</span>
+        <select
+          onChange={(event) =>
+            onDetectorChange({
+              ...detector,
+              envelope_mode: event.currentTarget.value as BalloonEnvelopeDetectorParams["envelope_mode"],
+            })
+          }
+          value={detector.envelope_mode}
+        >
+          <option value="solid_balloon">solid_balloon</option>
+          <option value="open_mesh">open_mesh</option>
+        </select>
+      </label>
+      <label className="stacked-field">
+        <span>Contact source</span>
+        <select
+          onChange={(event) =>
+            onDetectorChange({
+              ...detector,
+              contact_source: event.currentTarget.value as BalloonEnvelopeDetectorParams["contact_source"],
+            })
+          }
+          value={detector.contact_source}
+        >
+          <option value="raw_foreground">raw_foreground</option>
+          <option value="bridged_foreground">bridged_foreground</option>
+          <option value="filled_envelope">filled_envelope</option>
+        </select>
+      </label>
+    </>
   );
 }

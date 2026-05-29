@@ -161,6 +161,8 @@ def _recipe_payload(measurement_definition: dict[str, Any] | None) -> dict[str, 
         "name": measurement_definition.get("recipe_name"),
         "target_family": measurement_definition.get("target_family"),
         "roi": measurement_definition.get("roi"),
+        "segmentation": measurement_definition.get("segmentation"),
+        "detector": measurement_definition.get("detector"),
         "detector_version": measurement_definition.get("detector_version"),
     }
 

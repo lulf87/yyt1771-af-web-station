@@ -37,6 +37,8 @@ class DetectionStatus(StrEnum):
     CONTOUR_FRAGMENTED = "contour_fragmented"
     INTERNAL_TEXTURE_SELECTED = "internal_texture_selected"
     POINTS_NOT_ON_CONTOUR = "points_not_on_contour"
+    PATTERN_NOT_FOUND = "pattern_not_found"
+    OBJECT_INTERVAL_COUNT_MISMATCH = "object_interval_count_mismatch"
     QUALITY_BELOW_THRESHOLD = "quality_below_threshold"
     JUMP_EXCEEDS_LIMIT = "jump_exceeds_limit"
     COORDINATE_MAPPING_ERROR = "coordinate_mapping_error"
@@ -100,6 +102,9 @@ class SegmentationParams(BaseModel):
 
 class BalloonEnvelopeDetectorParams(BaseModel):
     detector_kind: Literal[DetectorKind.BALLOON_ENVELOPE_DETECTOR] = DetectorKind.BALLOON_ENVELOPE_DETECTOR
+    envelope_mode: Literal["solid_balloon", "open_mesh"] = "solid_balloon"
+    contact_source: Literal["raw_foreground", "bridged_foreground", "filled_envelope"] = "filled_envelope"
+    measurement_model: Literal["blank_object_blank"] = "blank_object_blank"
     min_quality: float = 0.65
     max_point_jump_px: float | None = 25.0
     reject_contact_on_roi_boundary: bool = True
@@ -110,6 +115,8 @@ class BalloonEnvelopeDetectorParams(BaseModel):
 
 class WireStripDetectorParams(BaseModel):
     detector_kind: Literal[DetectorKind.WIRE_STRIP_DETECTOR] = DetectorKind.WIRE_STRIP_DETECTOR
+    measurement_model: Literal["blank_object_blank_object_blank"] = "blank_object_blank_object_blank"
+    measurement_mode: Literal["outer_to_outer"] = "outer_to_outer"
     min_quality: float = 0.60
     max_point_jump_px: float | None = 20.0
     reject_contact_on_roi_boundary: bool = True
@@ -144,6 +151,15 @@ MeasurementRecipe = Annotated[
 class DetectionDiagnostics(BaseModel):
     detector: DetectorKind
     detector_version: str = "v1"
+    envelope_mode: str | None = None
+    configured_contact_source: str | None = None
+    contact_source_used: str | None = None
+    actual_contact_source_area_ratio: float | None = None
+    threshold_mode: str | None = None
+    configured_polarity: str | None = None
+    close_kernel: int | None = None
+    open_kernel: int | None = None
+    min_component_area_px: int | None = None
     contour_area_px: float | None = None
     contour_point_count: int | None = None
     candidate_components: int | None = None
@@ -154,10 +170,22 @@ class DetectionDiagnostics(BaseModel):
     foreground_area_ratio_in_roi: float | None = None
     raw_foreground_area_px: int | None = None
     raw_foreground_ratio: float | None = None
+    bridged_foreground_ratio: float | None = None
     morphology_foreground_area_px: int | None = None
     morphology_foreground_ratio: float | None = None
     filled_envelope_area_px: int | None = None
     filled_envelope_ratio: float | None = None
+    point_a_local: Point2D | None = None
+    point_b_local: Point2D | None = None
+    measurement_line_y: float | None = None
+    local_y_delta_px: float | None = None
+    parallel_error_px: float | None = None
+    chord_length_px: float | None = None
+    pattern_model: str | None = None
+    detected_pattern: str | None = None
+    object_interval_count: int | None = None
+    selected_intervals: list[dict] | None = None
+    measurement_mode: str | None = None
     selected_component_area_px: int | None = None
     selected_component_bbox: dict | None = None
     candidate_component_count: int | None = None
@@ -174,7 +202,6 @@ class DetectionDiagnostics(BaseModel):
     rejected_contact_side: str | None = None
     rejected_candidate_point_a: Point2D | None = None
     rejected_candidate_point_b: Point2D | None = None
-    contact_source_used: str | None = None
     fill_internal_holes_used: bool | None = None
     message: str | None = None
 
@@ -200,6 +227,36 @@ Rules:
 - `quality` must always be present.
 - `point_a` and `point_b`, when present, must be in `acquisition` coordinates.
 - `diagnostics.detector` must be either `balloon_envelope_detector` or `wire_strip_detector`.
+
+## Measurement definition
+
+Confirmed setup must persist a complete recipe snapshot, not only a recipe name:
+
+```python
+class MeasurementDefinition(BaseModel):
+    measurement_definition_id: str
+    name: str
+    target_family: TargetFamily
+    roi: RotatedRoi
+    recipe_name: str
+    segmentation: SegmentationParams
+    detector: BalloonEnvelopeDetectorParams | WireStripDetectorParams
+    detector_version: str = "v1"
+    acquisition_frame_size: AcquisitionFrameSize
+    coordinate_space: CoordinateSpace = CoordinateSpace.ACQUISITION
+    created_at_ms: int
+```
+
+Run-time detection must use this confirmed `segmentation` and `detector` snapshot. It must not silently reload default detector params from `recipe_name`.
+
+The saved detector snapshot must include the measurement contract parameters:
+
+- `BalloonEnvelopeDetectorParams.measurement_model = "blank_object_blank"`
+- `WireStripDetectorParams.measurement_model = "blank_object_blank_object_blank"`
+- `WireStripDetectorParams.measurement_mode = "outer_to_outer"`
+- detector version
+
+Formal A/B points remain in acquisition coordinates. ROI-local A/B, `measurement_line_y`, `local_y_delta_px`, and `parallel_error_px` are diagnostics that verify the same-line chord contract.
 
 ## Run sample
 

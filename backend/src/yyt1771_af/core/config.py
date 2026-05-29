@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from yyt1771_af.core.models import (
     BalloonEnvelopeDetectorParams,
+    DetectorParams,
     RotatedRoi,
     SegmentationParams,
     WireStripDetectorParams,
@@ -33,6 +34,8 @@ class CameraProfileConfig(BaseModel):
 class OfflineValidationConfig(BaseModel):
     target_family: TargetFamily | None = None
     roi: RotatedRoi
+    segmentation: SegmentationParams | None = None
+    detector: DetectorParams | None = None
     recipe: dict[str, Any] = Field(default_factory=dict)
     frames_dir: Path | None = None
     fps: float | None = Field(default=None, gt=0.0)

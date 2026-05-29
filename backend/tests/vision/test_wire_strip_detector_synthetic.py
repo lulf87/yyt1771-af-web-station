@@ -30,6 +30,31 @@ def _rotated_strip_frame(
     return image
 
 
+def _wire_pair_frame(
+    roi: RotatedRoi,
+    *,
+    left_interval: tuple[float, float] = (-45.0, -25.0),
+    right_interval: tuple[float, float] = (25.0, 45.0),
+    object_half_height: float = 24.0,
+    background: int = 230,
+    target: int = 30,
+) -> np.ndarray:
+    y, x = np.indices((180, 240))
+    angle = math.radians(roi.angle_deg)
+    unit_x = (math.cos(angle), math.sin(angle))
+    unit_y = (-unit_x[1], unit_x[0])
+    dx = x.astype(float) - roi.center_x
+    dy = y.astype(float) - roi.center_y
+    local_x = dx * unit_x[0] + dy * unit_x[1]
+    local_y = dx * unit_y[0] + dy * unit_y[1]
+    left = (local_x >= left_interval[0]) & (local_x <= left_interval[1])
+    right = (local_x >= right_interval[0]) & (local_x <= right_interval[1])
+    mask = (left | right) & (np.abs(local_y) <= object_half_height)
+    image = np.full((180, 240), background, dtype=np.uint8)
+    image[mask] = target
+    return image
+
+
 def _rotated_strip_mask(
     *,
     width: int = 240,
@@ -61,9 +86,23 @@ def _strip_roi(*, strip_angle_deg: float = 0.0, width: float = 58.0) -> RotatedR
     )
 
 
-def _projection(point_x: float, point_y: float, angle_deg: float) -> float:
-    angle = math.radians(angle_deg)
-    return point_x * math.cos(angle) + point_y * math.sin(angle)
+def _wire_pair_roi(*, angle_deg: float = 0.0, width: float = 130.0) -> RotatedRoi:
+    return RotatedRoi(
+        center_x=120.0,
+        center_y=90.0,
+        width=width,
+        height=90.0,
+        angle_deg=angle_deg,
+    )
+
+
+def _local_coordinates(point_x: float, point_y: float, roi: RotatedRoi) -> tuple[float, float]:
+    angle = math.radians(roi.angle_deg)
+    unit_x = (math.cos(angle), math.sin(angle))
+    unit_y = (-unit_x[1], unit_x[0])
+    dx = point_x - roi.center_x
+    dy = point_y - roi.center_y
+    return (dx * unit_x[0] + dy * unit_x[1], dx * unit_y[0] + dy * unit_y[1])
 
 
 def _assert_point_on_strip_contour(point_x: float, point_y: float, *, angle_deg: float) -> None:
@@ -79,14 +118,21 @@ def _assert_point_on_strip_contour(point_x: float, point_y: float, *, angle_deg:
     assert np.any(~mask[y_min:y_max, x_min:x_max])
 
 
-def test_straight_wire_strip_returns_opposing_edge_contacts_not_endpoints() -> None:
+def test_straight_wire_strip_returns_outer_to_outer_contacts_not_endpoints() -> None:
     detector = WireStripDetector()
-    roi = _strip_roi(strip_angle_deg=0.0)
+    roi = _wire_pair_roi(angle_deg=0.0)
 
     result = detector.detect(
-        frame=_rotated_strip_frame(angle_deg=0.0),
+        frame=_wire_pair_frame(roi),
         roi=roi,
-        segmentation=SegmentationParams(close_kernel=5, open_kernel=1),
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
         params=WireStripDetectorParams(),
     )
 
@@ -99,24 +145,33 @@ def test_straight_wire_strip_returns_opposing_edge_contacts_not_endpoints() -> N
     assert result.point_a.coordinate_space is CoordinateSpace.ACQUISITION
     assert result.point_b.coordinate_space is CoordinateSpace.ACQUISITION
     assert result.distance_px is not None
-    assert 18.0 <= result.distance_px <= 23.0
-    assert abs(result.point_a.x - 120.0) <= 2.0
-    assert abs(result.point_b.x - 120.0) <= 2.0
-    assert result.point_a.y < 83.0
-    assert result.point_b.y > 97.0
-    _assert_point_on_strip_contour(result.point_a.x, result.point_a.y, angle_deg=0.0)
-    _assert_point_on_strip_contour(result.point_b.x, result.point_b.y, angle_deg=0.0)
+    assert 88.0 <= result.distance_px <= 92.0
+    assert result.diagnostics.measurement_mode == "outer_to_outer"
+    assert result.diagnostics.object_interval_count == 2
+    a_local = _local_coordinates(result.point_a.x, result.point_a.y, roi)
+    b_local = _local_coordinates(result.point_b.x, result.point_b.y, roi)
+    assert abs(a_local[1] - b_local[1]) <= 1.0
+    assert abs(a_local[1]) <= 1.0
+    assert abs(b_local[1]) <= 1.0
+    assert a_local[0] < -43.0
+    assert b_local[0] > 43.0
 
 
 def test_rotated_wire_strip_returns_acquisition_contact_points() -> None:
     detector = WireStripDetector()
-    strip_angle = 30.0
-    roi = _strip_roi(strip_angle_deg=strip_angle)
+    roi = _wire_pair_roi(angle_deg=30.0)
 
     result = detector.detect(
-        frame=_rotated_strip_frame(angle_deg=strip_angle),
+        frame=_wire_pair_frame(roi),
         roi=roi,
-        segmentation=SegmentationParams(close_kernel=5, open_kernel=1),
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
         params=WireStripDetectorParams(),
     )
 
@@ -126,34 +181,30 @@ def test_rotated_wire_strip_returns_acquisition_contact_points() -> None:
     assert result.point_b is not None
     assert result.point_a.coordinate_space is CoordinateSpace.ACQUISITION
     assert result.point_b.coordinate_space is CoordinateSpace.ACQUISITION
-    projection_delta = _projection(result.point_b.x, result.point_b.y, roi.angle_deg) - _projection(
-        result.point_a.x,
-        result.point_a.y,
-        roi.angle_deg,
-    )
-    assert 18.0 <= projection_delta <= 23.0
     assert result.distance_px is not None
-    assert 18.0 <= result.distance_px <= 24.0
-    _assert_point_on_strip_contour(
-        result.point_a.x,
-        result.point_a.y,
-        angle_deg=strip_angle,
-    )
-    _assert_point_on_strip_contour(
-        result.point_b.x,
-        result.point_b.y,
-        angle_deg=strip_angle,
-    )
+    assert 88.0 <= result.distance_px <= 94.0
+    assert result.diagnostics.parallel_error_px is not None
+    assert result.diagnostics.parallel_error_px <= 1.0
+    assert result.diagnostics.local_y_delta_px is not None
+    assert result.diagnostics.local_y_delta_px <= 1.0
 
 
 def test_wire_strip_fails_when_contact_is_created_by_roi_boundary() -> None:
     detector = WireStripDetector()
-    frame = _rotated_strip_frame(thickness=70.0, angle_deg=0.0)
+    roi = _wire_pair_roi(angle_deg=0.0, width=100.0)
+    frame = _wire_pair_frame(roi, left_interval=(-50.0, -28.0), right_interval=(28.0, 50.0))
 
     result = detector.detect(
         frame=frame,
-        roi=_strip_roi(strip_angle_deg=0.0, width=42.0),
-        segmentation=SegmentationParams(close_kernel=5, open_kernel=1),
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
         params=WireStripDetectorParams(boundary_margin_px=3.0),
     )
 
@@ -182,7 +233,7 @@ def test_wire_strip_fails_when_only_one_opposing_contour_side_is_visible() -> No
     )
 
     assert result.valid is False
-    assert result.status is DetectionStatus.OPPOSING_CONTOUR_EDGES_MISSING
+    assert result.status is DetectionStatus.OBJECT_INTERVAL_COUNT_MISMATCH
     assert result.point_a is None
     assert result.point_b is None
     assert result.distance_px is None

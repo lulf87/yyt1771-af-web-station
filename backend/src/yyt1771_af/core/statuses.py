@@ -34,6 +34,8 @@ class DetectionStatus(StrEnum):
     CONTOUR_FRAGMENTED = "contour_fragmented"
     INTERNAL_TEXTURE_SELECTED = "internal_texture_selected"
     POINTS_NOT_ON_CONTOUR = "points_not_on_contour"
+    PATTERN_NOT_FOUND = "pattern_not_found"
+    OBJECT_INTERVAL_COUNT_MISMATCH = "object_interval_count_mismatch"
     QUALITY_BELOW_THRESHOLD = "quality_below_threshold"
     JUMP_EXCEEDS_LIMIT = "jump_exceeds_limit"
     COORDINATE_MAPPING_ERROR = "coordinate_mapping_error"

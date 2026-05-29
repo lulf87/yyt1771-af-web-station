@@ -65,10 +65,24 @@ export function StatusPanel({ cameraStatus, detection, error }: StatusPanelProps
 
 function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
   const diagnostics = detection.diagnostics;
-  const rejectedA = pointLike(diagnostics.rejected_candidate_point_a);
-  const rejectedB = pointLike(diagnostics.rejected_candidate_point_b);
+  const diagnosticPointSuffix = detection.valid ? undefined : "rejected/debug";
+  const rejectedA = pointLike(diagnostics.rejected_candidate_point_a, "rejected/debug");
+  const rejectedB = pointLike(diagnostics.rejected_candidate_point_b, "rejected/debug");
   const rows = [
     ["Message", valueText(diagnostics.message)],
+    ["Pattern model", valueText(diagnostics.pattern_model)],
+    ["Detected pattern", valueText(diagnostics.detected_pattern)],
+    ["Measurement mode", valueText(diagnostics.measurement_mode)],
+    ["Measurement line y", valueText(diagnostics.measurement_line_y)],
+    ["A local x,y", pointLike(diagnostics.point_a_local, diagnosticPointSuffix)],
+    ["B local x,y", pointLike(diagnostics.point_b_local, diagnosticPointSuffix)],
+    ["Local y delta", valueText(diagnostics.local_y_delta_px)],
+    ["Parallel error", valueText(diagnostics.parallel_error_px)],
+    ["Chord length", valueText(diagnostics.chord_length_px)],
+    ["Envelope mode", valueText(diagnostics.envelope_mode)],
+    ["Configured source", valueText(diagnostics.configured_contact_source)],
+    ["Contact source", valueText(diagnostics.contact_source_used)],
+    ["Actual source ratio", valueText(diagnostics.actual_contact_source_area_ratio)],
     ["Selected polarity", valueText(diagnostics.selected_polarity)],
     ["Selected reason", valueText(diagnostics.selected_reason)],
     ["Threshold", valueText(diagnostics.threshold_value)],
@@ -76,6 +90,8 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
     ["Bridged ratio", valueText(diagnostics.morphology_foreground_ratio)],
     ["Filled ratio", valueText(diagnostics.filled_envelope_ratio)],
     ["Foreground ratio", valueText(diagnostics.foreground_area_ratio_in_roi)],
+    ["Object intervals", valueText(diagnostics.object_interval_count)],
+    ["Selected intervals", intervalSummary(diagnostics.selected_intervals)],
     ["Component area", valueText(diagnostics.selected_component_area_px)],
     ["Component bbox", bboxText(diagnostics.selected_component_bbox)],
     ["Component count", valueText(diagnostics.candidate_component_count)],
@@ -89,7 +105,6 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
     ["Right boundary px", valueText(diagnostics.distance_to_right_roi_boundary_px)],
     ["Rejected side", valueText(diagnostics.rejected_contact_side)],
     ["Boundary margin", valueText(diagnostics.boundary_margin_px)],
-    ["Contact source", valueText(diagnostics.contact_source_used)],
     ["Fill holes used", valueText(diagnostics.fill_internal_holes_used)],
     ["Rejected/debug A", rejectedA],
     ["Rejected/debug B", rejectedB],
@@ -146,10 +161,31 @@ function bboxText(value: unknown): string {
   return "N/A";
 }
 
-function pointLike(value: unknown): string {
+function pointLike(value: unknown, suffix?: string): string {
   if (typeof value === "object" && value !== null && "x" in value && "y" in value) {
     const point = value as Record<string, unknown>;
-    return `${valueText(point.x)}, ${valueText(point.y)} rejected/debug`;
+    const coordinate = `${valueText(point.x)}, ${valueText(point.y)}`;
+    return suffix ? `${coordinate} ${suffix}` : coordinate;
   }
   return "N/A";
+}
+
+function intervalSummary(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) {
+    return "N/A";
+  }
+  return value
+    .map((item) => {
+      if (
+        typeof item === "object" &&
+        item !== null &&
+        "start_local_x" in item &&
+        "end_local_x" in item
+      ) {
+        const interval = item as Record<string, unknown>;
+        return `${valueText(interval.start_local_x)}..${valueText(interval.end_local_x)}`;
+      }
+      return "N/A";
+    })
+    .join(", ");
 }

@@ -193,6 +193,75 @@ def test_balloon_run_uses_balloon_detector_for_every_sample(
         assert detection["point_b"]["coordinate_space"] == "acquisition"
 
 
+def test_run_uses_confirmed_detector_params_snapshot_instead_of_recipe_defaults(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("YYT1771_AF_RUNS_DIR", str(tmp_path))
+    client = TestClient(app)
+    client.post("/api/camera/open", json={"profile": "dev_mock"})
+    confirm_response = client.post(
+        "/api/setup/confirm",
+        json={
+            "name": "open-mesh-run",
+            "target_family": "balloon_envelope",
+            "roi": {
+                "center_x": 110.0,
+                "center_y": 110.0,
+                "width": 130.0,
+                "height": 80.0,
+                "angle_deg": 0.0,
+                "coordinate_space": "acquisition",
+            },
+            "recipe_name": "balloon_envelope_default",
+            "segmentation": {
+                "polarity": "dark_on_light",
+                "threshold_mode": "fixed",
+                "threshold_value": 160,
+                "blur_kernel": 3,
+                "close_kernel": 7,
+                "open_kernel": 1,
+                "min_component_area_px": 50,
+                "fill_internal_holes": False,
+            },
+            "detector": {
+                "detector_kind": "balloon_envelope_detector",
+                "envelope_mode": "open_mesh",
+                "contact_source": "bridged_foreground",
+                "min_quality": 0.65,
+                "reject_contact_on_roi_boundary": True,
+                "boundary_margin_px": 4.0,
+                "max_point_jump_px": 25.0,
+                "ignore_internal_texture": True,
+                "fill_internal_holes": False,
+                "bridge_mesh_gaps": True,
+            },
+        },
+    )
+    measurement_definition_id = confirm_response.json()["measurement_definition_id"]
+
+    run_id = client.post(
+        "/api/runs/start",
+        json={
+            "measurement_definition_id": measurement_definition_id,
+            "sample_hz": 1000.0,
+            "sample_count": 1,
+        },
+    ).json()["run_id"]
+
+    measurement_definition = json.loads(
+        (tmp_path / run_id / "measurement_definition.json").read_text(encoding="utf-8")
+    )
+    assert measurement_definition["detector"]["envelope_mode"] == "open_mesh"
+    assert measurement_definition["detector"]["contact_source"] == "bridged_foreground"
+
+    sample = client.get(f"/api/runs/{run_id}/samples").json()["samples"][0]
+    diagnostics = sample["detection"]["diagnostics"]
+    assert diagnostics["envelope_mode"] == "open_mesh"
+    assert diagnostics["configured_contact_source"] == "bridged_foreground"
+    assert diagnostics["contact_source_used"] == "bridged_foreground"
+
+
 def test_wire_run_uses_wire_detector_for_every_sample(
     monkeypatch,
     tmp_path: Path,

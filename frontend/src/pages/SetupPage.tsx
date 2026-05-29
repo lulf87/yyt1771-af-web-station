@@ -9,6 +9,7 @@ import {
 } from "../api/client";
 import type {
   CameraStatus,
+  DetectorParams,
   FrameRef,
   MeasurementDefinition,
   RotatedRoi,
@@ -25,6 +26,7 @@ import {
   debugOverlayUrlWithLayers,
   type DebugOverlayLayers,
 } from "./setupDebugOverlay";
+import { balloonRecipeForEnvelopeMode, recipeDefaultsForTarget } from "../setup/recipeDefaults";
 
 const defaultRois: Record<TargetFamily, RotatedRoi> = {
   balloon_envelope: {
@@ -45,29 +47,6 @@ const defaultRois: Record<TargetFamily, RotatedRoi> = {
   },
 };
 
-const defaultSegmentations: Record<TargetFamily, SegmentationParams> = {
-  balloon_envelope: {
-    polarity: "auto",
-    threshold_mode: "otsu",
-    threshold_value: null,
-    blur_kernel: 3,
-    close_kernel: 11,
-    open_kernel: 3,
-    min_component_area_px: 500,
-    fill_internal_holes: true,
-  },
-  wire_strip: {
-    polarity: "auto",
-    threshold_mode: "adaptive",
-    threshold_value: null,
-    blur_kernel: 3,
-    close_kernel: 5,
-    open_kernel: 3,
-    min_component_area_px: 80,
-    fill_internal_holes: false,
-  },
-};
-
 const defaultDebugOverlayLayers: DebugOverlayLayers = {
   showRawForeground: true,
   showMorphologyForeground: true,
@@ -82,7 +61,7 @@ const debugOverlayLayerFields: Array<{
 }> = [
   { key: "showRawForeground", label: "show raw foreground" },
   { key: "showMorphologyForeground", label: "show bridged/morphology foreground" },
-  { key: "showFilledEnvelope", label: "show filled envelope" },
+  { key: "showFilledEnvelope", label: "show filled envelope debug layer" },
   { key: "showSelectedContour", label: "show selected contour" },
   { key: "showRejectedCandidates", label: "show rejected candidates" },
 ];
@@ -98,7 +77,10 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
   const [targetFamily, setTargetFamily] = useState<TargetFamily>("balloon_envelope");
   const [roi, setRoi] = useState<RotatedRoi>(defaultRois.balloon_envelope);
   const [segmentation, setSegmentation] = useState<SegmentationParams>(
-    defaultSegmentations.balloon_envelope,
+    recipeDefaultsForTarget("balloon_envelope").segmentation,
+  );
+  const [detector, setDetector] = useState<DetectorParams>(
+    recipeDefaultsForTarget("balloon_envelope").detector,
   );
   const [debugOverlayLayers, setDebugOverlayLayers] = useState<DebugOverlayLayers>(
     defaultDebugOverlayLayers,
@@ -158,6 +140,7 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
         target_family: targetFamily,
         recipe_name: recipeName,
         segmentation,
+        detector,
       });
       setDetection(result);
     });
@@ -171,6 +154,7 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
         roi,
         recipe_name: recipeName,
         segmentation,
+        detector,
       });
       onMeasurementDefinitionConfirmed(response.measurement_definition);
     });
@@ -178,8 +162,25 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
 
   function handleTargetFamilyChange(nextTargetFamily: TargetFamily) {
     setTargetFamily(nextTargetFamily);
+    const defaults = recipeDefaultsForTarget(nextTargetFamily);
     setRoi(defaultRois[nextTargetFamily]);
-    setSegmentation(defaultSegmentations[nextTargetFamily]);
+    setSegmentation(defaults.segmentation);
+    setDetector(defaults.detector);
+    setDetection(null);
+  }
+
+  function handleDetectorChange(nextDetector: DetectorParams) {
+    if (
+      detector.detector_kind === "balloon_envelope_detector" &&
+      nextDetector.detector_kind === "balloon_envelope_detector" &&
+      detector.envelope_mode !== nextDetector.envelope_mode
+    ) {
+      const recommended = balloonRecipeForEnvelopeMode(nextDetector.envelope_mode);
+      setSegmentation(recommended.segmentation);
+      setDetector(recommended.detector);
+    } else {
+      setDetector(nextDetector);
+    }
     setDetection(null);
   }
 
@@ -285,12 +286,21 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
               These controls only affect current setup detection and confirmed local recipe data.
             </p>
             <SegmentationControls
+              detector={detector}
+              onDetectorChange={handleDetectorChange}
               value={segmentation}
               onChange={(nextSegmentation) => {
                 setSegmentation(nextSegmentation);
                 setDetection(null);
               }}
             />
+          </section>
+
+          <section className="panel-section">
+            <h2>Recipe summary</h2>
+            <dl className="metric-list compact-list">
+              <RecipeSummaryRows detector={detector} segmentation={segmentation} targetFamily={targetFamily} />
+            </dl>
           </section>
 
           <section className="panel-section">
@@ -318,5 +328,46 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
         </aside>
       </section>
     </main>
+  );
+}
+
+function RecipeSummaryRows({
+  detector,
+  segmentation,
+  targetFamily,
+}: {
+  detector: DetectorParams;
+  segmentation: SegmentationParams;
+  targetFamily: TargetFamily;
+}) {
+  const envelopeMode =
+    detector.detector_kind === "balloon_envelope_detector" ? detector.envelope_mode : "N/A";
+  const contactSource =
+    detector.detector_kind === "balloon_envelope_detector" ? detector.contact_source : "N/A";
+  const measurementMode =
+    detector.detector_kind === "wire_strip_detector" ? detector.measurement_mode : "N/A";
+  const rows: Array<[string, string | number | boolean | null | undefined]> = [
+    ["Target", targetFamily],
+    ["Measurement model", detector.measurement_model],
+    ["Measurement mode", measurementMode],
+    ["Envelope mode", envelopeMode],
+    ["Contact source", contactSource],
+    ["Polarity", segmentation.polarity],
+    ["Threshold mode", segmentation.threshold_mode],
+    ["Threshold", segmentation.threshold_value],
+    ["Fill holes", segmentation.fill_internal_holes ?? false],
+    ["Close kernel", segmentation.close_kernel],
+    ["Open kernel", segmentation.open_kernel],
+    ["Min area", segmentation.min_component_area_px],
+  ];
+  return (
+    <>
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value === null || value === undefined ? "N/A" : String(value)}</dd>
+        </div>
+      ))}
+    </>
   );
 }

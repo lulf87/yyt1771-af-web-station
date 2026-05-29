@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { RunStartRequest, SetupDetectRequest } from "./types";
+import type { RunStartRequest, SetupConfirmRequest, SetupDetectRequest } from "./types";
 import {
+  confirmSetup,
   detectSetupFrame,
   downloadRunExport,
   getTemperatureStatus,
@@ -93,6 +94,62 @@ describe("setup API client", () => {
         body: JSON.stringify(request),
       }),
     );
+  });
+
+  it("posts complete detector recipe snapshot when confirming setup", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        measurement_definition_id: "md_1",
+        saved: true,
+        measurement_definition: {},
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request: SetupConfirmRequest = {
+      name: "open-mesh",
+      target_family: "balloon_envelope",
+      roi: {
+        center_x: 110,
+        center_y: 110,
+        width: 130,
+        height: 80,
+        angle_deg: 0,
+        coordinate_space: "acquisition",
+      },
+      recipe_name: "balloon_envelope_default",
+      segmentation: {
+        polarity: "dark_on_light",
+        threshold_mode: "fixed",
+        threshold_value: 160,
+        blur_kernel: 3,
+        close_kernel: 7,
+        open_kernel: 1,
+        min_component_area_px: 50,
+        fill_internal_holes: false,
+      },
+      detector: {
+        detector_kind: "balloon_envelope_detector",
+        envelope_mode: "open_mesh",
+        contact_source: "bridged_foreground",
+        measurement_model: "blank_object_blank",
+        min_quality: 0.65,
+        max_point_jump_px: 25,
+        reject_contact_on_roi_boundary: true,
+        boundary_margin_px: 4,
+        ignore_internal_texture: true,
+        fill_internal_holes: false,
+        bridge_mesh_gaps: true,
+      },
+    };
+
+    await confirmSetup(request);
+
+    const posted = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(posted.detector.envelope_mode).toBe("open_mesh");
+    expect(posted.detector.contact_source).toBe("bridged_foreground");
+    expect(posted.segmentation.threshold_value).toBe(160);
   });
 
   it("reports backend export failures without computing export data", async () => {
