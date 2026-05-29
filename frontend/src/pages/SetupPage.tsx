@@ -21,6 +21,10 @@ import { RoiEditor } from "../components/RoiEditor";
 import { SegmentationControls } from "../components/SegmentationControls";
 import { StatusPanel } from "../components/StatusPanel";
 import { TargetFamilySelector } from "../components/TargetFamilySelector";
+import {
+  debugOverlayUrlWithLayers,
+  type DebugOverlayLayers,
+} from "./setupDebugOverlay";
 
 const defaultRois: Record<TargetFamily, RotatedRoi> = {
   balloon_envelope: {
@@ -50,6 +54,7 @@ const defaultSegmentations: Record<TargetFamily, SegmentationParams> = {
     close_kernel: 11,
     open_kernel: 3,
     min_component_area_px: 500,
+    fill_internal_holes: true,
   },
   wire_strip: {
     polarity: "auto",
@@ -59,8 +64,28 @@ const defaultSegmentations: Record<TargetFamily, SegmentationParams> = {
     close_kernel: 5,
     open_kernel: 3,
     min_component_area_px: 80,
+    fill_internal_holes: false,
   },
 };
+
+const defaultDebugOverlayLayers: DebugOverlayLayers = {
+  showRawForeground: true,
+  showMorphologyForeground: true,
+  showFilledEnvelope: true,
+  showSelectedContour: true,
+  showRejectedCandidates: true,
+};
+
+const debugOverlayLayerFields: Array<{
+  key: keyof DebugOverlayLayers;
+  label: string;
+}> = [
+  { key: "showRawForeground", label: "show raw foreground" },
+  { key: "showMorphologyForeground", label: "show bridged/morphology foreground" },
+  { key: "showFilledEnvelope", label: "show filled envelope" },
+  { key: "showSelectedContour", label: "show selected contour" },
+  { key: "showRejectedCandidates", label: "show rejected candidates" },
+];
 
 interface SetupPageProps {
   onMeasurementDefinitionConfirmed: (measurementDefinition: MeasurementDefinition) => void;
@@ -74,6 +99,9 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
   const [roi, setRoi] = useState<RotatedRoi>(defaultRois.balloon_envelope);
   const [segmentation, setSegmentation] = useState<SegmentationParams>(
     defaultSegmentations.balloon_envelope,
+  );
+  const [debugOverlayLayers, setDebugOverlayLayers] = useState<DebugOverlayLayers>(
+    defaultDebugOverlayLayers,
   );
   const [detection, setDetection] = useState<SetupDetectResponse | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -169,6 +197,10 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
 
   const hasOpenSource = cameraStatus?.opened === true;
   const isBusy = busyAction !== null;
+  const debugOverlayUrl = debugOverlayUrlWithLayers(
+    detection?.debug_overlay_url,
+    debugOverlayLayers,
+  );
 
   return (
     <main className="app-shell">
@@ -195,10 +227,27 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
             previewUrl={previewUrl}
             roi={roi}
           />
-          {detection?.debug_overlay_url ? (
+          {debugOverlayUrl ? (
             <section className="debug-overlay-panel" aria-label="Detection debug overlay">
               <h2>Debug mask / component / contour</h2>
-              <img alt="Detection debug overlay" src={detection.debug_overlay_url} />
+              <div className="debug-layer-controls">
+                {debugOverlayLayerFields.map((field) => (
+                  <label className="inline-check" key={field.key}>
+                    <input
+                      checked={debugOverlayLayers[field.key]}
+                      onChange={(event) =>
+                        setDebugOverlayLayers({
+                          ...debugOverlayLayers,
+                          [field.key]: event.currentTarget.checked,
+                        })
+                      }
+                      type="checkbox"
+                    />
+                    <span>{field.label}</span>
+                  </label>
+                ))}
+              </div>
+              <img alt="Detection debug overlay" src={debugOverlayUrl} />
             </section>
           ) : null}
         </section>

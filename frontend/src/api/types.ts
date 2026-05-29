@@ -110,6 +110,7 @@ export interface SegmentationParams {
   close_kernel: number;
   open_kernel: number;
   min_component_area_px: number;
+  fill_internal_holes?: boolean | null;
 }
 
 export interface FramePreviewMetadata {

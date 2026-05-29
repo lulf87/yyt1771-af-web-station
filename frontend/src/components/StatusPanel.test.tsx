@@ -20,16 +20,25 @@ describe("StatusPanel debug diagnostics", () => {
         selected_polarity: "auto_dark_selected",
         selected_reason: "preferred_point_dark",
         threshold_value: 196,
+        raw_foreground_ratio: 0.36,
+        morphology_foreground_ratio: 0.48,
+        filled_envelope_ratio: 0.62,
         foreground_area_ratio_in_roi: 0.48,
         selected_component_area_px: 676613,
         selected_component_bbox: { min_x: 643, min_y: 324, max_x: 1765, max_y: 1125 },
         candidate_component_count: 2,
         min_local_projection: -508.4,
         max_local_projection: 613.6,
+        left_margin_px: 105.7,
+        right_margin_px: 0.54,
+        top_margin_px: 12.3,
+        bottom_margin_px: 1.2,
         distance_to_left_roi_boundary_px: 105.7,
         distance_to_right_roi_boundary_px: 0.54,
         rejected_contact_side: "right",
         boundary_margin_px: 4,
+        contact_source_used: "filled_envelope",
+        fill_internal_holes_used: true,
         rejected_candidate_point_a: { x: 643, y: 700, coordinate_space: "acquisition" },
         rejected_candidate_point_b: { x: 1765, y: 700, coordinate_space: "acquisition" },
       },
@@ -45,6 +54,12 @@ describe("StatusPanel debug diagnostics", () => {
     expect(markup).toContain("auto_dark_selected");
     expect(markup).toContain("preferred_point_dark");
     expect(markup).toContain("196");
+    expect(markup).toContain("Raw ratio");
+    expect(markup).toContain("Bridged ratio");
+    expect(markup).toContain("Filled ratio");
+    expect(markup).toContain("Top margin");
+    expect(markup).toContain("Bottom margin");
+    expect(markup).toContain("filled_envelope");
     expect(markup).toContain("0.54");
     expect(markup).toContain("right");
     expect(markup).toContain("rejected/debug");

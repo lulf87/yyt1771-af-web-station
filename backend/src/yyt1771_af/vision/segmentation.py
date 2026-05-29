@@ -29,8 +29,18 @@ class SegmentationDebug:
     preferred_point_xy: tuple[float, float] | None
     preferred_point_hit_dark: bool
     preferred_point_hit_light: bool
+    raw_foreground_area_px: int
+    raw_foreground_ratio: float
+    morphology_foreground_area_px: int
+    morphology_foreground_ratio: float
     foreground_area_px: int
     foreground_area_ratio_in_roi: float
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentationMaskLayers:
+    raw_foreground: np.ndarray
+    morphology_foreground: np.ndarray
 
 
 def segment_target_mask(
@@ -56,18 +66,44 @@ def segment_target_mask_debug(
     *,
     preferred_point_xy: tuple[float, float] | None = None,
 ) -> tuple[np.ndarray, float, SegmentationDebug]:
+    layers, quality, debug = segment_target_mask_layers_debug(
+        frame,
+        roi_mask,
+        params,
+        preferred_point_xy=preferred_point_xy,
+    )
+    return layers.morphology_foreground, quality, debug
+
+
+def segment_target_mask_layers_debug(
+    frame: np.ndarray,
+    roi_mask: np.ndarray,
+    params: SegmentationParams,
+    *,
+    preferred_point_xy: tuple[float, float] | None = None,
+) -> tuple[SegmentationMaskLayers, float, SegmentationDebug]:
     image = _as_grayscale_uint8(frame)
     roi_values = image[roi_mask]
     roi_area = max(1, int(np.count_nonzero(roi_mask)))
     if roi_values.size == 0:
         foreground = np.zeros_like(roi_mask, dtype=bool)
-        return foreground, 0.0, _empty_debug(preferred_point_xy)
+        return (
+            SegmentationMaskLayers(
+                raw_foreground=foreground,
+                morphology_foreground=foreground.copy(),
+            ),
+            0.0,
+            _empty_debug(preferred_point_xy),
+        )
 
     contrast = float(np.percentile(roi_values, 95) - np.percentile(roi_values, 5))
     if contrast <= 4.0:
         foreground = np.zeros_like(roi_mask, dtype=bool)
         return (
-            foreground,
+            SegmentationMaskLayers(
+                raw_foreground=foreground,
+                morphology_foreground=foreground.copy(),
+            ),
             0.0,
             SegmentationDebug(
                 threshold_value=None,
@@ -79,6 +115,10 @@ def segment_target_mask_debug(
                 preferred_point_xy=preferred_point_xy,
                 preferred_point_hit_dark=False,
                 preferred_point_hit_light=False,
+                raw_foreground_area_px=0,
+                raw_foreground_ratio=0.0,
+                morphology_foreground_area_px=0,
+                morphology_foreground_ratio=0.0,
                 foreground_area_px=0,
                 foreground_area_ratio_in_roi=0.0,
             ),
@@ -87,7 +127,7 @@ def segment_target_mask_debug(
     threshold = _threshold_value(roi_values, params)
     dark_mask = (image <= threshold) & roi_mask
     light_mask = (image > threshold) & roi_mask
-    foreground, polarity_debug = _choose_polarity_mask_debug(
+    raw_foreground, polarity_debug = _choose_polarity_mask_debug(
         dark_mask,
         light_mask,
         roi_mask,
@@ -95,10 +135,11 @@ def segment_target_mask_debug(
         preferred_point_xy=preferred_point_xy,
     )
 
-    foreground = binary_close(foreground, params.close_kernel)
-    foreground = binary_open(foreground, params.open_kernel)
-    foreground &= roi_mask
-    foreground_area = int(np.count_nonzero(foreground))
+    morphology_foreground = binary_close(raw_foreground, params.close_kernel)
+    morphology_foreground = binary_open(morphology_foreground, params.open_kernel)
+    morphology_foreground &= roi_mask
+    raw_area = int(np.count_nonzero(raw_foreground))
+    morphology_area = int(np.count_nonzero(morphology_foreground))
     debug = SegmentationDebug(
         threshold_value=threshold,
         contrast=contrast,
@@ -109,10 +150,21 @@ def segment_target_mask_debug(
         preferred_point_xy=preferred_point_xy,
         preferred_point_hit_dark=bool(polarity_debug["preferred_point_hit_dark"]),
         preferred_point_hit_light=bool(polarity_debug["preferred_point_hit_light"]),
-        foreground_area_px=foreground_area,
-        foreground_area_ratio_in_roi=float(foreground_area / roi_area),
+        raw_foreground_area_px=raw_area,
+        raw_foreground_ratio=float(raw_area / roi_area),
+        morphology_foreground_area_px=morphology_area,
+        morphology_foreground_ratio=float(morphology_area / roi_area),
+        foreground_area_px=morphology_area,
+        foreground_area_ratio_in_roi=float(morphology_area / roi_area),
     )
-    return foreground, min(1.0, contrast / 80.0), debug
+    return (
+        SegmentationMaskLayers(
+            raw_foreground=raw_foreground,
+            morphology_foreground=morphology_foreground,
+        ),
+        min(1.0, contrast / 80.0),
+        debug,
+    )
 
 
 def connected_components(mask: np.ndarray, min_area_px: int) -> list[BinaryComponent]:
@@ -414,6 +466,10 @@ def _empty_debug(preferred_point_xy: tuple[float, float] | None) -> Segmentation
         preferred_point_xy=preferred_point_xy,
         preferred_point_hit_dark=False,
         preferred_point_hit_light=False,
+        raw_foreground_area_px=0,
+        raw_foreground_ratio=0.0,
+        morphology_foreground_area_px=0,
+        morphology_foreground_ratio=0.0,
         foreground_area_px=0,
         foreground_area_ratio_in_roi=0.0,
     )

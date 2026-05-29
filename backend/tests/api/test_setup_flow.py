@@ -109,9 +109,21 @@ def test_setup_detect_accepts_segmentation_override_and_serves_debug_overlay() -
     assert payload["diagnostics"]["selected_polarity"] == "dark_on_light"
     assert payload["diagnostics"]["selected_reason"] == "forced_dark"
     assert payload["diagnostics"]["threshold_value"] is not None
+    assert "raw_foreground_ratio" in payload["diagnostics"]
+    assert "morphology_foreground_ratio" in payload["diagnostics"]
+    assert "filled_envelope_ratio" in payload["diagnostics"]
+    assert "fill_internal_holes_used" in payload["diagnostics"]
+    assert payload["diagnostics"]["contact_source_used"] == "filled_envelope"
     assert payload["debug_overlay_url"].startswith("/api/setup/debug-overlay/")
 
-    overlay_response = client.get(payload["debug_overlay_url"])
+    overlay_response = client.get(
+        payload["debug_overlay_url"]
+        + "&show_raw_foreground=false"
+        + "&show_morphology_foreground=true"
+        + "&show_filled_envelope=true"
+        + "&show_selected_contour=true"
+        + "&show_rejected_candidates=true"
+    )
     assert overlay_response.status_code == 200
     assert overlay_response.headers["content-type"] == "image/png"
     assert overlay_response.content.startswith(b"\x89PNG")

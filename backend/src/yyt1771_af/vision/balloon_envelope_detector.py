@@ -13,6 +13,7 @@ from yyt1771_af.core.statuses import DetectionStatus, DetectorKind, TargetFamily
 from yyt1771_af.vision.roi_ops import (
     ContactRejection,
     component_bbox,
+    component_roi_margins,
     failure_result,
     roi_is_inside_frame,
     rotated_roi_mask,
@@ -22,7 +23,7 @@ from yyt1771_af.vision.roi_ops import (
 from yyt1771_af.vision.segmentation import (
     connected_components,
     fill_internal_holes,
-    segment_target_mask_debug,
+    segment_target_mask_layers_debug,
 )
 
 
@@ -53,37 +54,57 @@ class BalloonEnvelopeDetector:
             )
 
         roi_mask = rotated_roi_mask(frame.shape, roi)
-        foreground, contrast_quality, segmentation_debug = segment_target_mask_debug(
-            frame,
-            roi_mask,
-            segmentation,
-            preferred_point_xy=(roi.center_x, roi.center_y),
+        roi_area = max(1, int(np.count_nonzero(roi_mask)))
+        segmentation_layers, contrast_quality, segmentation_debug = (
+            segment_target_mask_layers_debug(
+                frame,
+                roi_mask,
+                segmentation,
+                preferred_point_xy=(roi.center_x, roi.center_y),
+            )
+        )
+        filled_envelope = fill_internal_holes(segmentation_layers.morphology_foreground) & roi_mask
+        fill_internal_holes_used = (
+            params.fill_internal_holes
+            if segmentation.fill_internal_holes is None
+            else segmentation.fill_internal_holes
+        )
+        contact_source_used = (
+            "filled_envelope" if fill_internal_holes_used else "morphology_foreground"
+        )
+        foreground = (
+            filled_envelope
+            if fill_internal_holes_used
+            else segmentation_layers.morphology_foreground
+        )
+        layer_diagnostics = _segmentation_diagnostics(
+            segmentation_debug,
+            filled_envelope=filled_envelope,
+            roi_area=roi_area,
+            fill_internal_holes_used=fill_internal_holes_used,
+            contact_source_used=contact_source_used,
         )
         if not np.any(foreground):
             return self._failure(
                 DetectionStatus.LOW_CONTRAST,
                 quality=contrast_quality,
-                diagnostics_extra=_segmentation_diagnostics(segmentation_debug),
+                diagnostics_extra=layer_diagnostics,
             )
-
-        if params.fill_internal_holes:
-            foreground = fill_internal_holes(foreground)
-            foreground &= roi_mask
 
         components = connected_components(foreground, segmentation.min_component_area_px)
         if not components:
             return self._failure(
                 DetectionStatus.TARGET_NOT_FOUND,
                 quality=contrast_quality,
-                diagnostics_extra=_segmentation_diagnostics(segmentation_debug)
-                | {"candidate_component_count": 0},
+                diagnostics_extra=layer_diagnostics | {"candidate_component_count": 0},
             )
         if len(components) > 1 and components[1].area_px > components[0].area_px * 0.35:
             return self._failure(
                 DetectionStatus.MULTIPLE_TARGETS,
                 quality=contrast_quality,
                 candidate_components=len(components),
-                diagnostics_extra=_segmentation_diagnostics(segmentation_debug)
+                diagnostics_extra=layer_diagnostics
+                | _component_margin_diagnostics(components[0], roi)
                 | {
                     "candidate_component_count": len(components),
                     "selected_component_area_px": components[0].area_px,
@@ -98,13 +119,17 @@ class BalloonEnvelopeDetector:
             boundary_margin_px=params.boundary_margin_px,
             reject_contact_on_roi_boundary=params.reject_contact_on_roi_boundary,
         )
-        component_diagnostics = _segmentation_diagnostics(segmentation_debug) | {
-            "candidate_component_count": len(components),
-            "selected_component_area_px": component.area_px,
-            "selected_component_bbox": component_bbox(component),
-            "boundary_margin_px": params.boundary_margin_px,
-            "roi_half_width": roi.width / 2.0,
-        }
+        component_diagnostics = (
+            layer_diagnostics
+            | _component_margin_diagnostics(component, roi)
+            | {
+                "candidate_component_count": len(components),
+                "selected_component_area_px": component.area_px,
+                "selected_component_bbox": component_bbox(component),
+                "boundary_margin_px": params.boundary_margin_px,
+                "roi_half_width": roi.width / 2.0,
+            }
+        )
         if isinstance(selection, ContactRejection):
             return self._failure(
                 selection.status,
@@ -165,7 +190,15 @@ class BalloonEnvelopeDetector:
         )
 
 
-def _segmentation_diagnostics(segmentation_debug: object) -> dict[str, object]:
+def _segmentation_diagnostics(
+    segmentation_debug: object,
+    *,
+    filled_envelope: np.ndarray,
+    roi_area: int,
+    fill_internal_holes_used: bool,
+    contact_source_used: str,
+) -> dict[str, object]:
+    filled_area = int(np.count_nonzero(filled_envelope))
     return {
         "threshold_value": segmentation_debug.threshold_value,
         "selected_polarity": segmentation_debug.selected_polarity,
@@ -181,8 +214,16 @@ def _segmentation_diagnostics(segmentation_debug: object) -> dict[str, object]:
         else None,
         "preferred_point_hit_dark": segmentation_debug.preferred_point_hit_dark,
         "preferred_point_hit_light": segmentation_debug.preferred_point_hit_light,
+        "raw_foreground_area_px": segmentation_debug.raw_foreground_area_px,
+        "raw_foreground_ratio": segmentation_debug.raw_foreground_ratio,
+        "morphology_foreground_area_px": segmentation_debug.morphology_foreground_area_px,
+        "morphology_foreground_ratio": segmentation_debug.morphology_foreground_ratio,
+        "filled_envelope_area_px": filled_area,
+        "filled_envelope_ratio": float(filled_area / max(1, roi_area)),
         "foreground_area_px": segmentation_debug.foreground_area_px,
         "foreground_area_ratio_in_roi": segmentation_debug.foreground_area_ratio_in_roi,
+        "fill_internal_holes_used": fill_internal_holes_used,
+        "contact_source_used": contact_source_used,
     }
 
 
@@ -196,6 +237,16 @@ def _contact_diagnostics(contact_debug: object) -> dict[str, object]:
         "rejected_contact_side": contact_debug.rejected_side,
         "rejected_candidate_point_a": contact_debug.rejected_candidate_point_a,
         "rejected_candidate_point_b": contact_debug.rejected_candidate_point_b,
+    }
+
+
+def _component_margin_diagnostics(component: object, roi: RotatedRoi) -> dict[str, object]:
+    margins = component_roi_margins(component, roi)
+    return {
+        "left_margin_px": margins.left_margin_px,
+        "right_margin_px": margins.right_margin_px,
+        "top_margin_px": margins.top_margin_px,
+        "bottom_margin_px": margins.bottom_margin_px,
     }
 
 

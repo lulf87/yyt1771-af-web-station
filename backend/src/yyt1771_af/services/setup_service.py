@@ -28,7 +28,7 @@ from yyt1771_af.vision.segmentation import (
     connected_components,
     contour_mask,
     fill_internal_holes,
-    segment_target_mask_debug,
+    segment_target_mask_layers_debug,
 )
 
 
@@ -37,7 +37,9 @@ class DebugOverlayArtifact:
     frame_ref: FrameRef
     roi: RotatedRoi
     detection: DetectionResult
-    foreground_mask: np.ndarray | None
+    raw_foreground_mask: np.ndarray | None
+    morphology_foreground_mask: np.ndarray | None
+    filled_envelope_mask: np.ndarray | None
     selected_component_mask: np.ndarray | None
     selected_contour_mask: np.ndarray | None
 
@@ -170,6 +172,11 @@ class SetupService:
         *,
         max_width: int,
         max_height: int | None = None,
+        show_raw_foreground: bool = True,
+        show_morphology_foreground: bool = True,
+        show_filled_envelope: bool = True,
+        show_selected_contour: bool = True,
+        show_rejected_candidates: bool = True,
     ) -> bytes:
         artifact = self._debug_artifacts.get(debug_id)
         if artifact is None:
@@ -179,11 +186,18 @@ class SetupService:
             frame=frame.image,
             roi=artifact.roi,
             detection=artifact.detection,
-            foreground_mask=artifact.foreground_mask,
+            raw_foreground_mask=artifact.raw_foreground_mask,
+            morphology_foreground_mask=artifact.morphology_foreground_mask,
+            filled_envelope_mask=artifact.filled_envelope_mask,
             selected_component_mask=artifact.selected_component_mask,
             selected_contour_mask=artifact.selected_contour_mask,
             max_width=max_width,
             max_height=max_height,
+            show_raw_foreground=show_raw_foreground,
+            show_morphology_foreground=show_morphology_foreground,
+            show_filled_envelope=show_filled_envelope,
+            show_selected_contour=show_selected_contour,
+            show_rejected_candidates=show_rejected_candidates,
         )
 
     def _trim_debug_artifacts(self) -> None:
@@ -240,33 +254,41 @@ def _build_debug_artifact(
 ) -> DebugOverlayArtifact:
     try:
         roi_mask = rotated_roi_mask(frame_image.shape, roi)
-        foreground, _, _ = segment_target_mask_debug(
+        layers, _, _ = segment_target_mask_layers_debug(
             frame_image,
             roi_mask,
             segmentation,
             preferred_point_xy=(roi.center_x, roi.center_y),
         )
-        if (
-            target_family is TargetFamily.BALLOON_ENVELOPE
-            and isinstance(detector_params, BalloonEnvelopeDetectorParams)
-            and detector_params.fill_internal_holes
-        ):
-            foreground = fill_internal_holes(foreground)
-            foreground &= roi_mask
+        filled_envelope = fill_internal_holes(layers.morphology_foreground) & roi_mask
+        fill_internal_holes_used = (
+            detector_params.fill_internal_holes
+            if (
+                target_family is TargetFamily.BALLOON_ENVELOPE
+                and isinstance(detector_params, BalloonEnvelopeDetectorParams)
+            )
+            else False
+        )
+        if segmentation.fill_internal_holes is not None:
+            fill_internal_holes_used = segmentation.fill_internal_holes
+        foreground = filled_envelope if fill_internal_holes_used else layers.morphology_foreground
         components = connected_components(foreground, segmentation.min_component_area_px)
         selected_component_mask = components[0].mask if components else None
         selected_contour_mask = (
             contour_mask(selected_component_mask) if selected_component_mask is not None else None
         )
     except ValueError:
-        foreground = None
+        layers = None
+        filled_envelope = None
         selected_component_mask = None
         selected_contour_mask = None
     return DebugOverlayArtifact(
         frame_ref=frame_ref,
         roi=roi,
         detection=detection,
-        foreground_mask=foreground,
+        raw_foreground_mask=layers.raw_foreground if layers is not None else None,
+        morphology_foreground_mask=layers.morphology_foreground if layers is not None else None,
+        filled_envelope_mask=filled_envelope,
         selected_component_mask=selected_component_mask,
         selected_contour_mask=selected_contour_mask,
     )

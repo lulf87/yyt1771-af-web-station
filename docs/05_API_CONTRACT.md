@@ -174,13 +174,21 @@ Successful response:
     "threshold_value": 196,
     "selected_polarity": "auto_dark_selected",
     "selected_reason": "preferred_point_dark",
-    "foreground_area_ratio_in_roi": 0.48,
+    "raw_foreground_ratio": 0.36,
+    "morphology_foreground_ratio": 0.48,
+    "filled_envelope_ratio": 0.62,
     "selected_component_bbox": {
       "min_x": 643,
       "min_y": 324,
       "max_x": 1765,
       "max_y": 1125
-    }
+    },
+    "left_margin_px": 105.7,
+    "right_margin_px": 0.54,
+    "top_margin_px": 12.3,
+    "bottom_margin_px": 1.2,
+    "contact_source_used": "filled_envelope",
+    "fill_internal_holes_used": true
   }
 }
 ```
@@ -212,9 +220,11 @@ Failure response:
 ```
 
 `debug_overlay_url` returns a downsampled PNG visualization of the original frame,
-ROI, foreground mask, selected component, selected contour, boundary margin lines,
-and debug-only rejected contact candidates. It must not contain local filesystem
-paths.
+ROI, foreground layers, selected contour, ROI margin lines, and debug-only
+rejected contact candidates. It accepts boolean query parameters:
+`show_raw_foreground`, `show_morphology_foreground`, `show_filled_envelope`,
+`show_selected_contour`, and `show_rejected_candidates`. It must not contain
+local filesystem paths.
 
 ### `POST /api/setup/confirm`
 

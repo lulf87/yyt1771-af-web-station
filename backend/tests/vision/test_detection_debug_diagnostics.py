@@ -21,6 +21,15 @@ def _ellipse_frame() -> np.ndarray:
     return image
 
 
+def _hollow_box_frame() -> np.ndarray:
+    image = np.full((120, 160), 230, dtype=np.uint8)
+    image[30:91, 40:45] = 30
+    image[30:91, 115:120] = 30
+    image[30:35, 40:120] = 30
+    image[86:91, 40:120] = 30
+    return image
+
+
 def test_auto_polarity_records_center_on_light_background_selection() -> None:
     frame = _mesh_frame_with_bright_center()
     roi = RotatedRoi(center_x=80.0, center_y=60.0, width=120.0, height=82.0, angle_deg=0.0)
@@ -65,6 +74,28 @@ def test_forced_dark_polarity_changes_selected_foreground() -> None:
     assert np.count_nonzero(dark_foreground) < np.count_nonzero(auto_foreground)
 
 
+def test_fill_internal_holes_reports_raw_morphology_and_filled_area_ratios() -> None:
+    result = BalloonEnvelopeDetector().detect(
+        frame=_hollow_box_frame(),
+        roi=RotatedRoi(center_x=80.0, center_y=60.0, width=110.0, height=80.0, angle_deg=0.0),
+        segmentation=SegmentationParams(polarity="dark_on_light", close_kernel=1, open_kernel=1),
+        params=BalloonEnvelopeDetectorParams(fill_internal_holes=True),
+    )
+
+    diagnostics = result.diagnostics
+    assert diagnostics.raw_foreground_area_px is not None
+    assert diagnostics.morphology_foreground_area_px is not None
+    assert diagnostics.filled_envelope_area_px is not None
+    assert diagnostics.raw_foreground_ratio is not None
+    assert diagnostics.morphology_foreground_ratio is not None
+    assert diagnostics.filled_envelope_ratio is not None
+    assert diagnostics.raw_foreground_area_px == diagnostics.morphology_foreground_area_px
+    assert diagnostics.filled_envelope_area_px > diagnostics.morphology_foreground_area_px
+    assert diagnostics.filled_envelope_ratio > diagnostics.morphology_foreground_ratio
+    assert diagnostics.fill_internal_holes_used is True
+    assert diagnostics.contact_source_used == "filled_envelope"
+
+
 def test_boundary_rejection_keeps_formal_points_empty_but_records_debug_candidates() -> None:
     result = BalloonEnvelopeDetector().detect(
         frame=_ellipse_frame(),
@@ -81,6 +112,10 @@ def test_boundary_rejection_keeps_formal_points_empty_but_records_debug_candidat
 
     diagnostics = result.diagnostics
     assert diagnostics.rejected_contact_side == "both"
+    assert diagnostics.left_margin_px is not None
+    assert diagnostics.right_margin_px is not None
+    assert diagnostics.top_margin_px is not None
+    assert diagnostics.bottom_margin_px is not None
     assert diagnostics.distance_to_left_roi_boundary_px is not None
     assert diagnostics.distance_to_right_roi_boundary_px is not None
     assert diagnostics.distance_to_left_roi_boundary_px <= diagnostics.boundary_margin_px

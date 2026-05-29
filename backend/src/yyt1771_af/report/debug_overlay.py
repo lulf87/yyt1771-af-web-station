@@ -78,11 +78,18 @@ def render_detection_debug_overlay_png(
     frame: np.ndarray,
     roi: RotatedRoi,
     detection: DetectionResult,
-    foreground_mask: np.ndarray | None,
+    raw_foreground_mask: np.ndarray | None,
+    morphology_foreground_mask: np.ndarray | None,
+    filled_envelope_mask: np.ndarray | None,
     selected_component_mask: np.ndarray | None,
     selected_contour_mask: np.ndarray | None,
     max_width: int = 1200,
     max_height: int | None = None,
+    show_raw_foreground: bool = True,
+    show_morphology_foreground: bool = True,
+    show_filled_envelope: bool = True,
+    show_selected_contour: bool = True,
+    show_rejected_candidates: bool = True,
 ) -> bytes:
     source = np.asarray(frame)
     if source.ndim != 2:
@@ -99,19 +106,43 @@ def render_detection_debug_overlay_png(
     preview = np.clip(source[np.ix_(y_indices, x_indices)], 0, 255).astype(np.uint8)
     rgb = np.repeat(preview[:, :, None], 3, axis=2)
 
-    _blend_mask(rgb, _downsample_mask(foreground_mask, y_indices, x_indices), (60, 180, 255), 0.26)
+    if show_raw_foreground:
+        _blend_mask(
+            rgb,
+            _downsample_mask(raw_foreground_mask, y_indices, x_indices),
+            (60, 180, 255),
+            0.26,
+        )
     _blend_mask(
         rgb,
-        _downsample_mask(selected_component_mask, y_indices, x_indices),
+        _downsample_mask(morphology_foreground_mask, y_indices, x_indices)
+        if show_morphology_foreground
+        else None,
+        (255, 230, 80),
+        0.28,
+    )
+    _blend_mask(
+        rgb,
+        _downsample_mask(filled_envelope_mask, y_indices, x_indices)
+        if show_filled_envelope
+        else None,
         (255, 174, 66),
-        0.36,
+        0.34,
     )
-    _blend_mask(
-        rgb,
-        _downsample_mask(selected_contour_mask, y_indices, x_indices),
-        (255, 64, 64),
-        0.85,
-    )
+    if selected_component_mask is not None:
+        _blend_mask(
+            rgb,
+            _downsample_mask(selected_component_mask, y_indices, x_indices),
+            (255, 110, 60),
+            0.18,
+        )
+    if show_selected_contour:
+        _blend_mask(
+            rgb,
+            _downsample_mask(selected_contour_mask, y_indices, x_indices),
+            (255, 64, 64),
+            0.85,
+        )
 
     pixels = bytearray(rgb.astype(np.uint8).tobytes())
     scale_x = display_width / acquisition_width
@@ -140,22 +171,23 @@ def render_detection_debug_overlay_png(
         float(detection.diagnostics.boundary_margin_px or 0.0) * scale_x,
     )
 
-    _draw_point(
-        pixels,
-        display_width,
-        detection.diagnostics.rejected_candidate_point_a,
-        scale_x,
-        scale_y,
-        (190, 120, 255),
-    )
-    _draw_point(
-        pixels,
-        display_width,
-        detection.diagnostics.rejected_candidate_point_b,
-        scale_x,
-        scale_y,
-        (80, 255, 180),
-    )
+    if show_rejected_candidates:
+        _draw_point(
+            pixels,
+            display_width,
+            detection.diagnostics.rejected_candidate_point_a,
+            scale_x,
+            scale_y,
+            (190, 120, 255),
+        )
+        _draw_point(
+            pixels,
+            display_width,
+            detection.diagnostics.rejected_candidate_point_b,
+            scale_x,
+            scale_y,
+            (80, 255, 180),
+        )
     _draw_point(pixels, display_width, detection.point_a, scale_x, scale_y, (255, 80, 80))
     _draw_point(pixels, display_width, detection.point_b, scale_x, scale_y, (80, 220, 120))
 
@@ -179,7 +211,7 @@ def render_detection_debug_overlay_png(
         display_width,
         8,
         34,
-        f"SIDE:{side_text} RIGHT_MARGIN:{right_text} DEBUG CANDIDATES",
+        f"SIDE:{side_text} RIGHT_MARGIN:{right_text} REJECTED DEBUG",
         (255, 220, 120),
         scale=2,
     )
@@ -243,6 +275,21 @@ def _draw_boundary_margin_lines(
         y0 = roi.center_y + local_x * unit_y - roi.height / 2.0 * perp_y
         x1 = roi.center_x + local_x * unit_x + roi.height / 2.0 * perp_x
         y1 = roi.center_y + local_x * unit_y + roi.height / 2.0 * perp_y
+        draw_line(
+            pixels,
+            width,
+            int(round(x0)),
+            int(round(y0)),
+            int(round(x1)),
+            int(round(y1)),
+            (255, 230, 80),
+            thickness=1,
+        )
+    for local_y in (-roi.height / 2.0 + margin_px, roi.height / 2.0 - margin_px):
+        x0 = roi.center_x - roi.width / 2.0 * unit_x + local_y * perp_x
+        y0 = roi.center_y - roi.width / 2.0 * unit_y + local_y * perp_y
+        x1 = roi.center_x + roi.width / 2.0 * unit_x + local_y * perp_x
+        y1 = roi.center_y + roi.width / 2.0 * unit_y + local_y * perp_y
         draw_line(
             pixels,
             width,

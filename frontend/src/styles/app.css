@@ -385,6 +385,12 @@ select {
   margin-top: 14px;
 }
 
+.debug-layer-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
 .debug-overlay-panel img {
   display: block;
   width: 100%;

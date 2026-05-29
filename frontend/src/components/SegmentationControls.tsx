@@ -30,6 +30,19 @@ export function SegmentationControls({ value, onChange }: SegmentationControlsPr
 
   return (
     <div className="segmentation-controls">
+      <label className="inline-check">
+        <input
+          checked={value.fill_internal_holes ?? false}
+          onChange={(event) =>
+            onChange({
+              ...value,
+              fill_internal_holes: event.currentTarget.checked,
+            })
+          }
+          type="checkbox"
+        />
+        <span>Fill holes</span>
+      </label>
       <label className="stacked-field">
         <span>Polarity</span>
         <select

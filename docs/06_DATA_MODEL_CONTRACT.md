@@ -152,6 +152,12 @@ class DetectionDiagnostics(BaseModel):
     selected_reason: str | None = None
     foreground_area_px: int | None = None
     foreground_area_ratio_in_roi: float | None = None
+    raw_foreground_area_px: int | None = None
+    raw_foreground_ratio: float | None = None
+    morphology_foreground_area_px: int | None = None
+    morphology_foreground_ratio: float | None = None
+    filled_envelope_area_px: int | None = None
+    filled_envelope_ratio: float | None = None
     selected_component_area_px: int | None = None
     selected_component_bbox: dict | None = None
     candidate_component_count: int | None = None
@@ -160,10 +166,16 @@ class DetectionDiagnostics(BaseModel):
     roi_half_width: float | None = None
     distance_to_left_roi_boundary_px: float | None = None
     distance_to_right_roi_boundary_px: float | None = None
+    left_margin_px: float | None = None
+    right_margin_px: float | None = None
+    top_margin_px: float | None = None
+    bottom_margin_px: float | None = None
     boundary_margin_px: float | None = None
     rejected_contact_side: str | None = None
     rejected_candidate_point_a: Point2D | None = None
     rejected_candidate_point_b: Point2D | None = None
+    contact_source_used: str | None = None
+    fill_internal_holes_used: bool | None = None
     message: str | None = None
 
 class DetectionResult(BaseModel):

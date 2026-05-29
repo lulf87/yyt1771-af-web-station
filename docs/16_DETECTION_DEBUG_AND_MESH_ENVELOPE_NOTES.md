@@ -41,11 +41,12 @@ Because `polarity: auto` can use the preferred ROI center point, a center point 
 
 Do not disable `reject_contact_on_roi_boundary` to make A/B points appear. Instead, inspect the debug mask:
 
-- foreground mask: what thresholding selected
-- selected component: which connected component was measured
-- selected contour: which contour supplied contact candidates
+- raw foreground mask: what thresholding and polarity selected before morphology
+- bridged/morphology foreground: the raw foreground after close/open operations
+- filled envelope: the morphology foreground after optional hole filling
+- selected component contour: which connected component contour supplied contact candidates
 - rejected candidates: where the detector would have placed support contacts before rejection
-- boundary margin lines: why the candidate was rejected
+- boundary margin lines on all four ROI sides: why the candidate was rejected or suspicious
 
 Invalid detections still keep formal `point_a`, `point_b`, and `distance_px` as `null`. Rejected candidate points are debug-only evidence.
 
@@ -59,6 +60,15 @@ The Setup page includes segmentation controls that affect only the current setup
 - `close_kernel`
 - `open_kernel`
 - `min_component_area_px`
+- `fill_internal_holes`
+
+The debug overlay can show or hide:
+
+- raw foreground
+- bridged/morphology foreground
+- filled envelope
+- selected contour
+- rejected candidates
 
 Use these controls to test whether the failure is caused by polarity selection, thresholding, component size filtering, or ROI crop contact.
 
@@ -69,13 +79,18 @@ Important fields:
 - `selected_polarity`: which polarity was selected
 - `selected_reason`: why it was selected
 - `threshold_value`: threshold used for segmentation
-- `foreground_area_ratio_in_roi`: how much of the ROI became foreground
+- `raw_foreground_ratio`: how much of the ROI became foreground before morphology
+- `morphology_foreground_ratio`: how much remains after close/open
+- `filled_envelope_ratio`: how much becomes foreground after hole filling
 - `selected_component_bbox`: selected component bounding box in acquisition coordinates
 - `candidate_component_count`: number of components after filtering
 - `min_local_projection` / `max_local_projection`: selected contour support range
 - `distance_to_left_roi_boundary_px` / `distance_to_right_roi_boundary_px`: distance from candidate support to ROI boundary
+- `left_margin_px` / `right_margin_px` / `top_margin_px` / `bottom_margin_px`: selected component margin to the ROI sides
 - `rejected_contact_side`: `left`, `right`, `both`, or `null`
 - `rejected_candidate_point_a` / `rejected_candidate_point_b`: debug-only candidate contacts
+- `contact_source_used`: current mask used for formal contour contact selection
+- `fill_internal_holes_used`: whether the detector used the filled envelope as contact source
 
 If `foreground_area_ratio_in_roi` is very large, or the selected component bbox reaches the ROI crop boundary, the detector may have selected background or a fixture-connected region rather than the intended mesh envelope.
 

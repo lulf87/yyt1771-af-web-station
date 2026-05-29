@@ -46,12 +46,22 @@ def get_setup_debug_overlay(
     debug_id: str,
     max_width: int = Query(default=1200, ge=1, le=4096),
     max_height: int | None = Query(default=None, ge=1, le=4096),
+    show_raw_foreground: bool = Query(default=True),
+    show_morphology_foreground: bool = Query(default=True),
+    show_filled_envelope: bool = Query(default=True),
+    show_selected_contour: bool = Query(default=True),
+    show_rejected_candidates: bool = Query(default=True),
 ) -> Response:
     try:
         png = setup_service.debug_overlay_png(
             debug_id,
             max_width=max_width,
             max_height=max_height,
+            show_raw_foreground=show_raw_foreground,
+            show_morphology_foreground=show_morphology_foreground,
+            show_filled_envelope=show_filled_envelope,
+            show_selected_contour=show_selected_contour,
+            show_rejected_candidates=show_rejected_candidates,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="debug overlay is not available") from exc

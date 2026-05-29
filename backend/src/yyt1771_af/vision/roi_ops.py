@@ -48,6 +48,14 @@ class ContactRejection:
     debug: ContactDebug
 
 
+@dataclass(frozen=True, slots=True)
+class ComponentMargins:
+    left_margin_px: float
+    right_margin_px: float
+    top_margin_px: float
+    bottom_margin_px: float
+
+
 def rotated_roi_mask(shape: tuple[int, int], roi: RotatedRoi) -> np.ndarray:
     height, width = shape
     y, x = np.indices((height, width))
@@ -242,6 +250,27 @@ def component_bbox(component: BinaryComponent) -> ComponentBBox:
         min_y=int(np.min(yx[:, 0])),
         max_x=int(np.max(yx[:, 1])),
         max_y=int(np.max(yx[:, 0])),
+    )
+
+
+def component_roi_margins(component: BinaryComponent, roi: RotatedRoi) -> ComponentMargins:
+    point_xy = np.column_stack(
+        (
+            component.coordinates_yx[:, 1].astype(float),
+            component.coordinates_yx[:, 0].astype(float),
+        )
+    )
+    unit_x, unit_y = roi_measurement_direction(roi.angle_deg)
+    perp_x, perp_y = -unit_y, unit_x
+    centered_x = point_xy[:, 0] - roi.center_x
+    centered_y = point_xy[:, 1] - roi.center_y
+    local_x = centered_x * unit_x + centered_y * unit_y
+    local_y = centered_x * perp_x + centered_y * perp_y
+    return ComponentMargins(
+        left_margin_px=float(np.min(local_x) + roi.width / 2.0),
+        right_margin_px=float(roi.width / 2.0 - np.max(local_x)),
+        top_margin_px=float(np.min(local_y) + roi.height / 2.0),
+        bottom_margin_px=float(roi.height / 2.0 - np.max(local_y)),
     )
 
 
