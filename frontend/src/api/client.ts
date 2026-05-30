@@ -24,6 +24,8 @@ import type {
   SetupConfirmResponse,
   SetupDetectRequest,
   SetupDetectResponse,
+  WireAutoTuneRequest,
+  WireAutoTuneResponse,
   TemperatureCommandResponse,
   TemperatureControllerSnapshot,
   TemperatureReading,
@@ -62,6 +64,15 @@ export async function detectSetupFrame(
   request: SetupDetectRequest,
 ): Promise<SetupDetectResponse> {
   return requestJson<SetupDetectResponse>("/api/setup/detect", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function wireAutoTune(
+  request: WireAutoTuneRequest,
+): Promise<WireAutoTuneResponse> {
+  return requestJson<WireAutoTuneResponse>("/api/setup/wire-auto-tune", {
     method: "POST",
     body: JSON.stringify(request),
   });

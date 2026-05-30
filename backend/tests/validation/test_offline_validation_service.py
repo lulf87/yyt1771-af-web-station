@@ -7,8 +7,10 @@ import numpy as np
 from yyt1771_af.core.models import RotatedRoi
 from yyt1771_af.core.statuses import TargetFamily
 from yyt1771_af.services.offline_validation_service import (
+    OfflineThresholdSweepRequest,
     OfflineValidationRequest,
     OverlayPolicy,
+    run_offline_threshold_sweep,
     run_offline_validation,
 )
 
@@ -132,6 +134,62 @@ def test_offline_validation_records_invalid_frames_without_fake_distance(tmp_pat
     assert samples[1]["point_a"] is None
     assert samples[1]["point_b"] is None
     assert samples[1]["reason"]
+
+
+def _wire_bundle_frame() -> np.ndarray:
+    height, width = 180, 240
+    center_x, center_y = 120.0, 90.0
+    y, x = np.indices((height, width))
+    dx = x.astype(float) - center_x
+    dy = y.astype(float) - center_y
+    wires = (
+        ((dx >= -48.0) & (dx <= -42.0))
+        | ((dx >= -14.0) & (dx <= -8.0))
+        | ((dx >= 38.0) & (dx <= 46.0))
+    ) & (np.abs(dy) <= 24.0)
+    image = np.full((height, width), 230, dtype=np.uint8)
+    image[wires] = 30
+    return image
+
+
+def test_offline_threshold_sweep_reports_per_threshold_stats(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "private" / "wire-frames"
+    output_dir = tmp_path / "sweep"
+    frames_dir.mkdir(parents=True)
+    for index in range(4):
+        np.save(frames_dir / f"frame_{index + 1:06d}.npy", _wire_bundle_frame())
+
+    result = run_offline_threshold_sweep(
+        OfflineThresholdSweepRequest(
+            frames_dir=frames_dir,
+            target_family=TargetFamily.WIRE_STRIP,
+            roi=RotatedRoi(
+                center_x=120.0,
+                center_y=90.0,
+                width=130.0,
+                height=90.0,
+                angle_deg=0.0,
+            ),
+            fps=10.0,
+            output_dir=output_dir,
+            candidate_thresholds=[100, 130, 160],
+            dataset_label="pytest-wire",
+        )
+    )
+
+    assert result.candidate_count == 3
+    assert result.recommended_threshold_value in {100, 130, 160}
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert summary["dataset_label"] == "pytest-wire"
+    assert summary["target_family"] == "wire_strip"
+    assert len(summary["candidates"]) == 3
+    candidate = summary["candidates"][0]
+    assert "valid_ratio" in candidate
+    assert "formal_ab_span_px_mean" in candidate
+    assert "broad_blob_rejection_mean" in candidate
+    assert "distance_jump_px_max" in candidate
+    assert str(frames_dir) not in result.summary_path.read_text(encoding="utf-8")
+    assert "/private/" not in result.summary_path.read_text(encoding="utf-8")
 
 
 def test_validation_artifacts_do_not_leak_absolute_paths(tmp_path: Path) -> None:

@@ -177,6 +177,7 @@ export interface MeasurementDefinition {
   };
   coordinate_space: CoordinateSpace;
   created_at_ms: number;
+  auto_tuned?: boolean;
 }
 
 export interface SetupConfirmRequest {
@@ -186,12 +187,49 @@ export interface SetupConfirmRequest {
   recipe_name: string;
   segmentation?: SegmentationParams | null;
   detector?: DetectorParams | null;
+  auto_tuned?: boolean;
 }
 
 export interface SetupConfirmResponse {
   measurement_definition_id: string;
   saved: boolean;
   measurement_definition: MeasurementDefinition;
+}
+
+export interface WireAutoTuneRequest {
+  frame_ref: FrameRef;
+  roi: RotatedRoi;
+  recipe_name: string;
+  target_family?: TargetFamily;
+  segmentation?: SegmentationParams | null;
+  detector?: DetectorParams | null;
+  candidate_thresholds?: number[] | null;
+}
+
+export interface WireAutoTuneCandidate {
+  threshold_value: number;
+  status: string;
+  valid: boolean;
+  formal_ab_span_px: number | null;
+  valid_interval_count: number | null;
+  rejected_interval_count: number;
+  broad_blob_rejection_count: number | null;
+  wire_likeness_score: number | null;
+  distance_px: number | null;
+  score: number;
+  on_stable_platform: boolean;
+}
+
+export interface WireAutoTuneResponse {
+  target_family: TargetFamily;
+  recommended_threshold_value: number | null;
+  recommended_polarity: string;
+  recommended_segmentation: SegmentationParams | null;
+  stable_platform_min: number | null;
+  stable_platform_max: number | null;
+  selected_reason: string;
+  auto_tuned: boolean;
+  candidates: WireAutoTuneCandidate[];
 }
 
 export interface RunStartRequest {

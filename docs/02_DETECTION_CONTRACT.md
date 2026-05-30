@@ -198,6 +198,22 @@ Important:
 - A line without enough valid wire interval support is invalid for `wire_strip`.
 - Run detection must choose the current frame's valid candidate line with the largest `formal_ab_span_px`.
 
+Wire foreground filtering (formal):
+
+```text
+Before line scanning, the general foreground mask is reduced to a trusted wire
+foreground by component-level filtering: area bounds, slenderness / aspect ratio,
+orientation tolerance, local contrast, and broad-blob rejection. Background blobs
+(e.g. a screw hole or a gray non-target region) are removed before A/B selection,
+so they cannot extend the formal bundle outer span. Internal wire-bundle gaps are
+capped so disjoint non-wire regions are not merged into one bundle.
+```
+
+Setup-only threshold tuning: fixed thresholds are fragile, so the setup phase may
+run Wire Auto Tune (threshold sweep + scoring + stable-platform selection) and
+persist the chosen fixed threshold into the confirmed recipe. The run phase never
+auto-tunes; it applies the confirmed recipe verbatim. See `docs/19`.
+
 Common failure reasons:
 
 - `target_not_found`

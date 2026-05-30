@@ -149,4 +149,44 @@ describe("StatusPanel debug diagnostics", () => {
     expect(markup).toContain("rejected/debug");
     expect(markup).toContain("不要直接放宽边界保护");
   });
+
+  it("shows wire-likeness and rejected-interval diagnostics for wire_strip", () => {
+    const detection: SetupDetectResponse = {
+      status: "ok",
+      valid: true,
+      point_a: { x: 61, y: 110, coordinate_space: "acquisition" },
+      point_b: { x: 159, y: 110, coordinate_space: "acquisition" },
+      distance_px: 98,
+      quality: 0.9,
+      target_family: "wire_strip",
+      detector: "wire_strip_detector:v1",
+      diagnostics: {
+        measurement_mode: "wire_bundle_envelope",
+        threshold_mode: "fixed",
+        wire_likeness_score: 0.82,
+        component_aspect_ratio: 7.5,
+        component_orientation: 2.1,
+        neighbor_line_support: 9,
+        broad_blob_rejection_count: 1,
+        broad_blob_area_ratio: 0.34,
+        rejected_intervals: [{ start_local_x: 20, end_local_x: 70, width_px: 50 }],
+        rejected_interval_reasons: ["broad_blob"],
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <StatusPanel cameraStatus={null} detection={detection} error={null} />,
+    );
+
+    expect(markup).toContain("Wire likeness");
+    expect(markup).toContain("0.82");
+    expect(markup).toContain("Component aspect ratio");
+    expect(markup).toContain("Neighbor line support");
+    expect(markup).toContain("Broad blob rejections");
+    expect(markup).toContain("Broad blob area ratio");
+    expect(markup).toContain("Rejected intervals");
+    expect(markup).toContain("Rejected interval reasons");
+    expect(markup).toContain("broad_blob");
+    expect(markup).not.toContain("two_strip");
+  });
 });

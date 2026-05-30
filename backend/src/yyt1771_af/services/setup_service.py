@@ -31,6 +31,7 @@ from yyt1771_af.vision.segmentation import (
     fill_internal_holes,
     segment_target_mask_layers_debug,
 )
+from yyt1771_af.vision.wire_auto_tune import auto_tune_wire_threshold
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,12 +84,49 @@ class SetupConfirmRequest(BaseModel):
     recipe_name: str
     segmentation: SegmentationParams | None = None
     detector: DetectorParams | None = None
+    auto_tuned: bool = False
 
 
 class SetupConfirmResponse(BaseModel):
     measurement_definition_id: str
     saved: bool
     measurement_definition: MeasurementDefinition
+
+
+class WireAutoTuneRequest(BaseModel):
+    frame_ref: FrameRef
+    roi: RotatedRoi
+    recipe_name: str
+    target_family: TargetFamily = TargetFamily.WIRE_STRIP
+    segmentation: SegmentationParams | None = None
+    detector: DetectorParams | None = None
+    candidate_thresholds: list[int] | None = None
+
+
+class WireAutoTuneCandidateModel(BaseModel):
+    threshold_value: int
+    status: str
+    valid: bool
+    formal_ab_span_px: float | None = None
+    valid_interval_count: int | None = None
+    rejected_interval_count: int
+    broad_blob_rejection_count: int | None = None
+    wire_likeness_score: float | None = None
+    distance_px: float | None = None
+    score: float
+    on_stable_platform: bool
+
+
+class WireAutoTuneResponse(BaseModel):
+    target_family: str
+    recommended_threshold_value: int | None
+    recommended_polarity: str
+    recommended_segmentation: SegmentationParams | None
+    stable_platform_min: int | None
+    stable_platform_max: int | None
+    selected_reason: str
+    auto_tuned: bool
+    candidates: list[WireAutoTuneCandidateModel]
 
 
 class SetupService:
@@ -145,6 +183,63 @@ class SetupService:
             debug_overlay_url=f"/api/setup/debug-overlay/{debug_id}.png?max_width=1200",
         )
 
+    def auto_tune_wire(self, request: WireAutoTuneRequest) -> WireAutoTuneResponse:
+        if request.target_family is not TargetFamily.WIRE_STRIP:
+            raise ValueError("wire auto tune is only available for the wire_strip target family")
+        frame = self._camera.get_frame(request.frame_ref)
+        base_segmentation = request.segmentation or _segmentation_for_target(
+            TargetFamily.WIRE_STRIP,
+            request.recipe_name,
+        )
+        detector_params = _detector_params_for_request(
+            TargetFamily.WIRE_STRIP,
+            request.recipe_name,
+            request.detector,
+        )
+        if not isinstance(detector_params, WireStripDetectorParams):
+            raise ValueError("wire auto tune requires wire_strip detector params")
+        result = auto_tune_wire_threshold(
+            frame=frame.image,
+            roi=request.roi,
+            base_segmentation=base_segmentation,
+            detector_params=detector_params,
+            candidate_thresholds=request.candidate_thresholds,
+        )
+        recommended_segmentation: SegmentationParams | None = None
+        if result.recommended_threshold_value is not None:
+            recommended_segmentation = base_segmentation.model_copy(
+                update={
+                    "threshold_mode": "fixed",
+                    "threshold_value": result.recommended_threshold_value,
+                }
+            )
+        return WireAutoTuneResponse(
+            target_family=TargetFamily.WIRE_STRIP.value,
+            recommended_threshold_value=result.recommended_threshold_value,
+            recommended_polarity=result.recommended_polarity,
+            recommended_segmentation=recommended_segmentation,
+            stable_platform_min=result.stable_platform_min,
+            stable_platform_max=result.stable_platform_max,
+            selected_reason=result.selected_reason,
+            auto_tuned=result.auto_tuned,
+            candidates=[
+                WireAutoTuneCandidateModel(
+                    threshold_value=candidate.threshold_value,
+                    status=candidate.status,
+                    valid=candidate.valid,
+                    formal_ab_span_px=candidate.formal_ab_span_px,
+                    valid_interval_count=candidate.valid_interval_count,
+                    rejected_interval_count=candidate.rejected_interval_count,
+                    broad_blob_rejection_count=candidate.broad_blob_rejection_count,
+                    wire_likeness_score=candidate.wire_likeness_score,
+                    distance_px=candidate.distance_px,
+                    score=candidate.score,
+                    on_stable_platform=candidate.on_stable_platform,
+                )
+                for candidate in result.candidates
+            ],
+        )
+
     def confirm(self, request: SetupConfirmRequest) -> SetupConfirmResponse:
         frame = self._camera.current_frame()
         segmentation = request.segmentation or _segmentation_for_target(
@@ -167,6 +262,7 @@ class SetupService:
             detector_version="v1",
             acquisition_frame_size=AcquisitionFrameSize(width=frame.width, height=frame.height),
             created_at_ms=time.time_ns() // 1_000_000,
+            auto_tuned=request.auto_tuned,
         )
         self._measurement_definitions[measurement_definition.measurement_definition_id] = (
             measurement_definition

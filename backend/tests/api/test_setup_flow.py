@@ -230,6 +230,61 @@ def test_setup_detect_returns_backend_ab_points_for_wire_recipe() -> None:
     assert payload["diagnostics"]["interval_count"] >= 2
 
 
+def test_setup_wire_auto_tune_recommends_threshold_and_confirm_marks_auto_tuned() -> None:
+    client = TestClient(app)
+    client.post("/api/camera/open", json={"profile": "dev_mock"})
+    frame_ref = client.post("/api/setup/freeze", json={"source": "latest"}).json()["frame_ref"]
+    roi = {
+        "center_x": 235.0,
+        "center_y": 110.0,
+        "width": 55.0,
+        "height": 150.0,
+        "angle_deg": 90.0,
+        "coordinate_space": "acquisition",
+    }
+
+    auto_tune_response = client.post(
+        "/api/setup/wire-auto-tune",
+        json={
+            "frame_ref": frame_ref,
+            "roi": roi,
+            "recipe_name": "wire_strip_default",
+        },
+    )
+
+    assert auto_tune_response.status_code == 200
+    payload = auto_tune_response.json()
+    assert payload["target_family"] == "wire_strip"
+    assert payload["auto_tuned"] is True
+    assert payload["recommended_threshold_value"] is not None
+    assert payload["recommended_segmentation"]["threshold_mode"] == "fixed"
+    assert payload["recommended_segmentation"]["threshold_value"] == (
+        payload["recommended_threshold_value"]
+    )
+    assert len(payload["candidates"]) >= 1
+    candidate = payload["candidates"][0]
+    assert "score" in candidate
+    assert "on_stable_platform" in candidate
+    # No absolute paths leak through diagnostics-style payloads.
+    assert "/" not in str(payload["selected_reason"])
+
+    confirm_response = client.post(
+        "/api/setup/confirm",
+        json={
+            "name": "wire-auto-tuned",
+            "target_family": "wire_strip",
+            "roi": roi,
+            "recipe_name": "wire_strip_default",
+            "segmentation": payload["recommended_segmentation"],
+            "auto_tuned": True,
+        },
+    )
+    assert confirm_response.status_code == 200
+    measurement_definition = confirm_response.json()["measurement_definition"]
+    assert measurement_definition["auto_tuned"] is True
+    assert measurement_definition["segmentation"]["threshold_mode"] == "fixed"
+
+
 def test_offline_camera_open_reads_pgm_image_folder(
     monkeypatch,
     tmp_path: Path,

@@ -17,11 +17,28 @@ from yyt1771_af.vision.roi_ops import (
     mask_bbox,
     mask_roi_margins,
     roi_is_inside_frame,
+    roi_local_to_acquisition_point,
     rotated_roi_mask,
+    sample_line_intervals,
     select_roi_local_chord_contacts_debug,
     valid_result,
 )
-from yyt1771_af.vision.segmentation import connected_components, segment_target_mask_debug
+from yyt1771_af.vision.segmentation import (
+    BinaryComponent,
+    connected_components,
+    segment_target_mask_debug,
+)
+from yyt1771_af.vision.wire_filtering import (
+    WireComponentMetric,
+    WireForegroundAnalysis,
+    analyze_wire_components,
+)
+
+# Internal wire-bundle spaces below this fraction of the ROI width are kept;
+# larger gaps are treated as separation from non-target regions and split.
+# Kept generous because component-level filtering already removes broad
+# background blobs; this is only a coarse secondary guard.
+_WIRE_MAX_INTERNAL_GAP_RATIO = 0.9
 
 
 class WireStripDetector:
@@ -72,8 +89,48 @@ class WireStripDetector:
                 diagnostics_extra=_segmentation_diagnostics(segmentation_debug)
                 | {"candidate_component_count": 0},
             )
+        wire_analysis = analyze_wire_components(
+            image=frame,
+            roi=roi,
+            roi_mask=roi_mask,
+            foreground=foreground,
+            components=components,
+        )
+        recipe_diagnostics = {
+            "boundary_margin_px": params.boundary_margin_px,
+            "roi_half_width": roi.width / 2.0,
+            "pattern_model": params.measurement_model,
+            "measurement_mode": params.measurement_mode,
+            "threshold_mode": segmentation.threshold_mode,
+            "configured_polarity": segmentation.polarity,
+            "close_kernel": segmentation.close_kernel,
+            "open_kernel": segmentation.open_kernel,
+            "min_component_area_px": segmentation.min_component_area_px,
+        } | _wire_likeness_diagnostics(wire_analysis)
+
+        # Phase 2: the formal line scan runs on the filtered wire foreground so
+        # broad background blobs and low-contrast patches can no longer become
+        # wire intervals. The raw segmentation foreground is kept for overlays.
+        wire_foreground = wire_analysis.wire_foreground
+        if not np.any(wire_foreground):
+            return self._failure(
+                DetectionStatus.TARGET_NOT_FOUND,
+                quality=contrast_quality,
+                candidate_components=len(components),
+                diagnostics_extra=_segmentation_diagnostics(segmentation_debug)
+                | {"candidate_component_count": len(components)}
+                | recipe_diagnostics
+                | _rejected_interval_diagnostics(
+                    foreground=foreground,
+                    analysis=wire_analysis,
+                    components=components,
+                    roi=roi,
+                    line_y=0.0,
+                )
+                | {"message": "No wire-like foreground component remained after filtering."},
+            )
         selection = select_roi_local_chord_contacts_debug(
-            foreground,
+            wire_foreground,
             roi,
             pattern_model=params.measurement_model,
             measurement_mode=params.measurement_mode,
@@ -82,23 +139,20 @@ class WireStripDetector:
             allow_mesh_outer_span=True,
             source_layer="wire_foreground",
             raw_foreground_mask=foreground,
-            bridged_foreground_mask=foreground,
+            bridged_foreground_mask=wire_foreground,
             min_mesh_interval_count=2,
             bundle_detected_pattern="wire_bundle_envelope",
             prefer_largest_formal_span=True,
             reject_global_foreground_boundary=False,
+            max_internal_gap_px=_WIRE_MAX_INTERNAL_GAP_RATIO * roi.width,
         )
-        selected_bbox = mask_bbox(foreground)
-        margins = mask_roi_margins(foreground, roi)
+        selected_bbox = mask_bbox(wire_foreground)
+        margins = mask_roi_margins(wire_foreground, roi)
         component_diagnostics = _segmentation_diagnostics(segmentation_debug) | {
             "candidate_component_count": len(components),
-            "selected_component_area_px": int(np.count_nonzero(foreground)),
+            "selected_component_area_px": int(np.count_nonzero(wire_foreground)),
             "selected_component_bbox": selected_bbox or component_bbox(components[0]),
-            "boundary_margin_px": params.boundary_margin_px,
-            "roi_half_width": roi.width / 2.0,
-            "pattern_model": params.measurement_model,
-            "measurement_mode": params.measurement_mode,
-        }
+        } | recipe_diagnostics
         if margins is not None:
             component_diagnostics |= {
                 "left_margin_px": margins.left_margin_px,
@@ -115,6 +169,14 @@ class WireStripDetector:
                 candidate_components=len(components),
                 diagnostics_extra=component_diagnostics
                 | _contact_diagnostics(selection.debug)
+                | {"neighbor_line_support": selection.debug.neighbor_line_support}
+                | _rejected_interval_diagnostics(
+                    foreground=foreground,
+                    analysis=wire_analysis,
+                    components=components,
+                    roi=roi,
+                    line_y=selection.debug.measurement_line_y,
+                )
                 | {
                     "message": _failure_message(selection.status, selection.debug.rejected_side),
                 },
@@ -168,7 +230,15 @@ class WireStripDetector:
                 "candidate_line_is_debug_only": selection.candidate_line_is_debug_only,
                 "selected_line_reason": selection.selected_line_reason,
                 "measurement_mode": selection.measurement_mode,
+                "neighbor_line_support": selection.neighbor_line_support,
             }
+            | _rejected_interval_diagnostics(
+                foreground=foreground,
+                analysis=wire_analysis,
+                components=components,
+                roi=roi,
+                line_y=selection.measurement_line_y,
+            )
         )
         return result
 
@@ -194,6 +264,67 @@ class WireStripDetector:
             message=message,
             diagnostics_extra=diagnostics_extra,
         )
+
+
+def _wire_likeness_diagnostics(analysis: WireForegroundAnalysis) -> dict[str, object]:
+    return {
+        "broad_blob_rejection_count": analysis.broad_blob_rejection_count,
+        "broad_blob_area_ratio": analysis.broad_blob_area_ratio,
+        "wire_likeness_score": analysis.primary_wire_likeness_score,
+        "component_aspect_ratio": analysis.primary_aspect_ratio,
+        "component_orientation": analysis.primary_orientation_deg,
+    }
+
+
+def _rejected_interval_diagnostics(
+    *,
+    foreground: np.ndarray,
+    analysis: WireForegroundAnalysis,
+    components: list[BinaryComponent],
+    roi: RotatedRoi,
+    line_y: float | None,
+) -> dict[str, object]:
+    if line_y is None:
+        return {}
+    foreground_intervals = sample_line_intervals(foreground, roi, line_y)
+    rejected = []
+    reasons: list[str] = []
+    for interval in foreground_intervals:
+        center_local_x = (interval.start_local_x + interval.end_local_x) / 2.0
+        if _point_in_mask(analysis.wire_foreground, roi, center_local_x, line_y):
+            continue
+        rejected.append(interval)
+        reasons.append(_reject_reason_at(components, analysis.metrics, roi, center_local_x, line_y))
+    if not rejected:
+        return {}
+    return {"rejected_intervals": rejected, "rejected_interval_reasons": reasons}
+
+
+def _point_in_mask(mask: np.ndarray, roi: RotatedRoi, local_x: float, local_y: float) -> bool:
+    point = roi_local_to_acquisition_point(roi, local_x, local_y)
+    px = int(round(point.x))
+    py = int(round(point.y))
+    if not (0 <= py < mask.shape[0] and 0 <= px < mask.shape[1]):
+        return False
+    return bool(mask[py, px])
+
+
+def _reject_reason_at(
+    components: list[BinaryComponent],
+    metrics: list[WireComponentMetric],
+    roi: RotatedRoi,
+    local_x: float,
+    local_y: float,
+) -> str:
+    point = roi_local_to_acquisition_point(roi, local_x, local_y)
+    px = int(round(point.x))
+    py = int(round(point.y))
+    for component, metric in zip(components, metrics, strict=False):
+        if not (0 <= py < component.mask.shape[0] and 0 <= px < component.mask.shape[1]):
+            continue
+        if component.mask[py, px] and not metric.accepted:
+            return metric.reject_reason or "rejected"
+    return "background"
 
 
 def _segmentation_diagnostics(segmentation_debug: object) -> dict[str, object]:

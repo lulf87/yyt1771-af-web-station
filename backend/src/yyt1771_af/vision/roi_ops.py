@@ -58,6 +58,7 @@ class ContactSelection:
     candidate_line_is_debug_only: bool | None = None
     selected_line_reason: str | None = None
     measurement_mode: str | None = None
+    neighbor_line_support: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +104,7 @@ class ContactDebug:
     candidate_line_is_debug_only: bool | None = None
     selected_line_reason: str | None = None
     measurement_mode: str | None = None
+    neighbor_line_support: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +158,7 @@ class _LineCandidate:
     virtual_envelope_span_px: float | None = None
     candidate_line_is_debug_only: bool | None = None
     selected_line_reason: str | None = None
+    neighbor_line_support: int | None = None
     score: float = 0.0
 
 
@@ -219,6 +222,7 @@ def select_roi_local_chord_contacts_debug(
     bundle_detected_pattern: str = "mesh_outer_span",
     prefer_largest_formal_span: bool = False,
     reject_global_foreground_boundary: bool = True,
+    max_internal_gap_px: float | None = None,
 ) -> ContactSelection | ContactRejection:
     foreground = np.asarray(mask, dtype=bool)
     edge_mask = contour_mask(foreground)
@@ -264,6 +268,7 @@ def select_roi_local_chord_contacts_debug(
                 min_neighbor_support_lines=min_neighbor_support_lines,
                 line_step_px=line_step_px,
                 detected_pattern=bundle_detected_pattern,
+                max_internal_gap_px=max_internal_gap_px,
                 selected_line_reason=(
                     "max_formal_ab_span" if prefer_largest_formal_span else "highest_line_score"
                 ),
@@ -749,6 +754,16 @@ def _valid_mesh_intervals(
     return valid
 
 
+def sample_line_intervals(
+    mask: np.ndarray,
+    roi: RotatedRoi,
+    local_y: float,
+) -> list[ObjectInterval]:
+    """Public helper: object intervals along one ROI-local measurement line."""
+    line_mask, local_x_values = _sample_mask_line(np.asarray(mask, dtype=bool), roi, local_y)
+    return _line_intervals(line_mask, local_x_values, local_y)
+
+
 def _debug_intervals(
     mask: np.ndarray | None,
     roi: RotatedRoi,
@@ -769,6 +784,31 @@ def _virtual_span_px(
     if not intervals:
         return None
     return max(0.0, intervals[-1].end_local_x - intervals[0].start_local_x)
+
+
+def _largest_gap_bounded_cluster(
+    intervals: list[ObjectInterval],
+    max_internal_gap_px: float,
+) -> list[ObjectInterval]:
+    """Split intervals where the gap exceeds the limit; keep the widest run.
+
+    This prevents a remote dark region from being merged into the wire bundle
+    envelope across a large internal gap. Internal wire-bundle spaces below the
+    limit are preserved.
+    """
+    if len(intervals) < 2:
+        return intervals
+    clusters: list[list[ObjectInterval]] = [[intervals[0]]]
+    for interval in intervals[1:]:
+        gap = interval.start_local_x - clusters[-1][-1].end_local_x
+        if gap <= max_internal_gap_px:
+            clusters[-1].append(interval)
+        else:
+            clusters.append([interval])
+    return max(
+        clusters,
+        key=lambda cluster: cluster[-1].end_local_x - cluster[0].start_local_x,
+    )
 
 
 def _interval_gaps(intervals: list[ObjectInterval]) -> list[float]:
@@ -865,6 +905,7 @@ def _build_mesh_outer_span_candidate(
     line_step_px: float,
     detected_pattern: str,
     selected_line_reason: str,
+    max_internal_gap_px: float | None = None,
 ) -> _LineCandidate | None:
     supported_intervals = _valid_mesh_intervals(
         intervals,
@@ -888,6 +929,10 @@ def _build_mesh_outer_span_candidate(
         valid_intervals = supported_intervals
     if len(valid_intervals) < min_interval_count:
         return None
+    if max_internal_gap_px is not None:
+        valid_intervals = _largest_gap_bounded_cluster(valid_intervals, max_internal_gap_px)
+        if len(valid_intervals) < min_interval_count:
+            return None
     has_boundary_contact = any(
         interval.start_local_x + roi.width / 2.0 <= boundary_margin_px
         or roi.width / 2.0 - interval.end_local_x <= boundary_margin_px
@@ -959,6 +1004,7 @@ def _build_mesh_outer_span_candidate(
         virtual_envelope_span_px=virtual_span,
         candidate_line_is_debug_only=False,
         selected_line_reason=selected_line_reason,
+        neighbor_line_support=neighbor_support,
         score=score,
     )
 
@@ -1022,6 +1068,7 @@ def _candidate_from_local_span(
     virtual_envelope_span_px: float | None = None,
     candidate_line_is_debug_only: bool | None = None,
     selected_line_reason: str | None = None,
+    neighbor_line_support: int | None = None,
     score: float = 0.0,
 ) -> _LineCandidate:
     point_a_local = Point2D(
@@ -1071,6 +1118,7 @@ def _candidate_from_local_span(
         virtual_envelope_span_px=virtual_envelope_span_px,
         candidate_line_is_debug_only=candidate_line_is_debug_only,
         selected_line_reason=selected_line_reason,
+        neighbor_line_support=neighbor_line_support,
         score=score,
     )
 
@@ -1155,6 +1203,7 @@ def _replace_rejected_side(candidate: _LineCandidate, rejected_side: str | None)
         if candidate.candidate_line_is_debug_only is None
         else candidate.candidate_line_is_debug_only,
         selected_line_reason=candidate.selected_line_reason,
+        neighbor_line_support=candidate.neighbor_line_support,
         score=candidate.score,
     )
 
@@ -1200,6 +1249,7 @@ def _candidate_to_selection(candidate: _LineCandidate) -> ContactSelection:
         candidate_line_is_debug_only=candidate.candidate_line_is_debug_only,
         selected_line_reason=candidate.selected_line_reason,
         measurement_mode=candidate.measurement_mode,
+        neighbor_line_support=candidate.neighbor_line_support,
     )
 
 
@@ -1250,6 +1300,7 @@ def _candidate_to_debug(
         else candidate.candidate_line_is_debug_only,
         selected_line_reason=candidate.selected_line_reason,
         measurement_mode=candidate.measurement_mode,
+        neighbor_line_support=candidate.neighbor_line_support,
     )
 
 
@@ -1294,6 +1345,7 @@ def _chord_debug(
     virtual_envelope_span_px: float | None = None,
     candidate_line_is_debug_only: bool | None = None,
     selected_line_reason: str | None = None,
+    neighbor_line_support: int | None = None,
 ) -> ContactDebug:
     return ContactDebug(
         contour_point_count=contour_point_count,
@@ -1341,6 +1393,7 @@ def _chord_debug(
         candidate_line_is_debug_only=candidate_line_is_debug_only,
         selected_line_reason=selected_line_reason,
         measurement_mode=measurement_mode,
+        neighbor_line_support=neighbor_line_support,
     )
 
 

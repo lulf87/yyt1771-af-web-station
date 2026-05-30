@@ -293,6 +293,11 @@ def _threshold_value(values: np.ndarray, params: SegmentationParams) -> int:
     return _otsu_threshold(values)
 
 
+def otsu_threshold(values: np.ndarray) -> int:
+    """Public wrapper around the Otsu threshold computation."""
+    return _otsu_threshold(values)
+
+
 def _otsu_threshold(values: np.ndarray) -> int:
     hist = np.bincount(values.astype(np.uint8), minlength=256).astype(np.float64)
     total = hist.sum()

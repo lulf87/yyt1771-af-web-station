@@ -95,6 +95,19 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
     ["Raw intervals", intervalSummary(diagnostics.raw_intervals)],
     ["Bridged intervals", intervalSummary(diagnostics.bridged_intervals)],
     ["Selected valid intervals", intervalSummary(diagnostics.selected_valid_intervals)],
+    ["Rejected intervals", intervalSummary(diagnostics.rejected_intervals)],
+    ["Rejected interval reasons", reasonSummary(diagnostics.rejected_interval_reasons)],
+    ["Wire likeness", valueText(diagnostics.wire_likeness_score)],
+    ["Component aspect ratio", valueText(diagnostics.component_aspect_ratio)],
+    ["Component orientation", valueText(diagnostics.component_orientation)],
+    ["Neighbor line support", valueText(diagnostics.neighbor_line_support)],
+    ["Broad blob rejections", valueText(diagnostics.broad_blob_rejection_count)],
+    ["Broad blob area ratio", valueText(diagnostics.broad_blob_area_ratio)],
+    ["Threshold mode", valueText(diagnostics.threshold_mode)],
+    ["Configured polarity", valueText(diagnostics.configured_polarity)],
+    ["Close kernel", valueText(diagnostics.close_kernel)],
+    ["Open kernel", valueText(diagnostics.open_kernel)],
+    ["Min component area", valueText(diagnostics.min_component_area_px)],
     ["Leftmost valid interval", intervalSummary(singleInterval(diagnostics.leftmost_valid_interval))],
     ["Rightmost valid interval", intervalSummary(singleInterval(diagnostics.rightmost_valid_interval))],
     [
@@ -201,6 +214,13 @@ function pointLike(value: unknown, suffix?: string): string {
 
 function singleInterval(value: unknown): unknown[] | null {
   return value ? [value] : null;
+}
+
+function reasonSummary(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) {
+    return "N/A";
+  }
+  return value.map((item) => (typeof item === "string" ? item : "N/A")).join(", ");
 }
 
 function intervalSummary(value: unknown): string {

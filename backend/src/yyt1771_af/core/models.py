@@ -211,10 +211,18 @@ class DetectionDiagnostics(BaseModel):
     raw_intervals: list[ObjectInterval] | None = None
     bridged_intervals: list[ObjectInterval] | None = None
     selected_valid_intervals: list[ObjectInterval] | None = None
+    rejected_intervals: list[ObjectInterval] | None = None
+    rejected_interval_reasons: list[str] | None = None
     leftmost_valid_interval: ObjectInterval | None = None
     rightmost_valid_interval: ObjectInterval | None = None
     formal_point_a_source_interval: ObjectInterval | None = None
     formal_point_b_source_interval: ObjectInterval | None = None
+    broad_blob_rejection_count: int | None = None
+    broad_blob_area_ratio: float | None = None
+    wire_likeness_score: float | None = None
+    component_aspect_ratio: float | None = None
+    component_orientation: float | None = None
+    neighbor_line_support: int | None = None
     point_a_on_foreground_boundary: bool | None = None
     point_b_on_foreground_boundary: bool | None = None
     point_a_source_layer: str | None = None
@@ -362,6 +370,7 @@ class MeasurementDefinition(BaseModel):
     acquisition_frame_size: AcquisitionFrameSize
     coordinate_space: CoordinateSpace = CoordinateSpace.ACQUISITION
     created_at_ms: int
+    auto_tuned: bool = False
 
     @field_validator("coordinate_space")
     @classmethod

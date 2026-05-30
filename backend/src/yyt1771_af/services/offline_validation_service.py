@@ -75,6 +75,30 @@ class OfflineValidationResult:
     valid_frames: int
 
 
+@dataclass(frozen=True, slots=True)
+class OfflineThresholdSweepRequest:
+    frames_dir: Path
+    target_family: TargetFamily
+    roi: RotatedRoi
+    fps: float
+    output_dir: Path
+    candidate_thresholds: list[int]
+    max_frames: int | None = None
+    start_frame: int = 0
+    dataset_label: str | None = None
+    recipe_name: str | None = None
+    segmentation: SegmentationParams | None = None
+    detector: DetectorParams | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OfflineThresholdSweepResult:
+    output_dir: Path
+    summary_path: Path
+    recommended_threshold_value: int | None
+    candidate_count: int
+
+
 SAMPLE_FIELDS = [
     "frame_index",
     "frame_name",
@@ -261,6 +285,145 @@ def run_offline_validation(request: OfflineValidationRequest) -> OfflineValidati
         processed_frames=len(samples),
         valid_frames=summary["valid_frames"],
     )
+
+
+def run_offline_threshold_sweep(
+    request: OfflineThresholdSweepRequest,
+) -> OfflineThresholdSweepResult:
+    """Evaluate a recipe across multiple fixed thresholds for offline analysis.
+
+    Per-threshold statistics include valid ratio, interval counts, rejected
+    background (broad blob) stats, formal A/B span stats, and distance / A/B
+    jump stats. Diagnostics are for analysis only; the run phase uses the
+    confirmed recipe.
+    """
+    if request.fps <= 0.0:
+        raise ValueError("fps must be positive")
+    if not request.candidate_thresholds:
+        raise ValueError("candidate_thresholds must not be empty")
+
+    output_dir = request.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dataset_label = request.dataset_label or safe_path_label(str(request.frames_dir))
+
+    frame_paths = list_offline_frame_files(request.frames_dir)
+    selected_paths = frame_paths[request.start_frame :]
+    if request.max_frames is not None:
+        selected_paths = selected_paths[: request.max_frames]
+    if not selected_paths:
+        raise ValueError("no offline frames selected for threshold sweep")
+
+    base_segmentation, detector = _recipe_from_request(
+        OfflineValidationRequest(
+            frames_dir=request.frames_dir,
+            target_family=request.target_family,
+            roi=request.roi,
+            fps=request.fps,
+            output_dir=output_dir,
+            recipe_name=request.recipe_name,
+            segmentation=request.segmentation,
+            detector=request.detector,
+        )
+    )
+
+    candidate_summaries: list[dict[str, Any]] = []
+    for threshold in request.candidate_thresholds:
+        segmentation = base_segmentation.model_copy(
+            update={"threshold_mode": "fixed", "threshold_value": int(threshold)}
+        )
+        samples = [
+            _evaluate_frame(
+                frame_path=frame_path,
+                frame_index=request.start_frame + offset,
+                relative_time_s=(request.start_frame + offset) / request.fps,
+                target_family=request.target_family,
+                roi=request.roi,
+                segmentation=segmentation,
+                params=detector,
+            )
+            for offset, frame_path in enumerate(selected_paths)
+        ]
+        candidate_summaries.append(
+            _threshold_candidate_summary(int(threshold), samples)
+        )
+
+    recommended = _recommend_sweep_threshold(candidate_summaries)
+    summary_payload = sanitize_path_metadata(
+        {
+            "dataset_label": dataset_label,
+            "target_family": request.target_family.value,
+            "processed_frames": len(selected_paths),
+            "recommended_threshold_value": recommended,
+            "candidates": candidate_summaries,
+        }
+    )
+    summary_path = output_dir / "threshold_sweep_summary.json"
+    _write_json(summary_path, summary_payload)
+    return OfflineThresholdSweepResult(
+        output_dir=output_dir,
+        summary_path=summary_path,
+        recommended_threshold_value=recommended,
+        candidate_count=len(candidate_summaries),
+    )
+
+
+def _threshold_candidate_summary(
+    threshold_value: int,
+    samples: list[dict[str, Any]],
+) -> dict[str, Any]:
+    processed = len(samples)
+    valid_samples = [s for s in samples if s["valid"] and s["distance_px"] is not None]
+    valid_frames = len(valid_samples)
+    formal_spans = _diagnostic_values(valid_samples, "formal_ab_span_px")
+    broad_blob = _diagnostic_values(samples, "broad_blob_rejection_count")
+    rejected_counts = [
+        float(len(_diagnostic_value(s, "rejected_intervals") or [])) for s in samples
+    ]
+    interval_histogram = dict(
+        sorted(
+            Counter(
+                str(int(value))
+                for value in _diagnostic_values(samples, "object_interval_count")
+            ).items()
+        )
+    )
+    point_jump_summary = _point_jump_summary(samples)
+    return {
+        "threshold_value": threshold_value,
+        "processed_frames": processed,
+        "valid_frames": valid_frames,
+        "valid_ratio": round(valid_frames / processed, 6) if processed else 0.0,
+        "object_interval_count_histogram": interval_histogram,
+        "broad_blob_rejection_mean": _mean_or_none(broad_blob),
+        "broad_blob_rejection_max": _max_or_none(broad_blob),
+        "rejected_interval_mean": _mean_or_none(rejected_counts),
+        "rejected_interval_max": _max_or_none(rejected_counts),
+        "formal_ab_span_px_min": _min_or_none(formal_spans),
+        "formal_ab_span_px_max": _max_or_none(formal_spans),
+        "formal_ab_span_px_mean": _mean_or_none(formal_spans),
+        "formal_ab_span_px_std": (
+            round(pstdev(formal_spans), 6) if len(formal_spans) >= 2 else None
+        ),
+        "distance_jump_px_mean": point_jump_summary["distance_jump_px_mean"],
+        "distance_jump_px_max": point_jump_summary["distance_jump_px_max"],
+        "point_a_jump_px_max": point_jump_summary["point_a_jump_px_max"],
+        "point_b_jump_px_max": point_jump_summary["point_b_jump_px_max"],
+    }
+
+
+def _recommend_sweep_threshold(candidates: list[dict[str, Any]]) -> int | None:
+    eligible = [c for c in candidates if c["valid_ratio"] > 0.0]
+    if not eligible:
+        return None
+    best = max(
+        eligible,
+        key=lambda c: (
+            c["valid_ratio"],
+            -(c["broad_blob_rejection_mean"] or 0.0),
+            -(c["formal_ab_span_px_std"] or 0.0),
+        ),
+    )
+    return int(best["threshold_value"])
 
 
 def _evaluate_frame(

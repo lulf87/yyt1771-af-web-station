@@ -461,3 +461,20 @@ Work:
 ## Decision Rule
 
 Proceed toward live camera adaptation only when the offline pipeline can explain why a frame is valid, why a frame is invalid, and why the selected recipe remains stable under realistic variation. If the detector cannot explain the selected contour source, margins, threshold sensitivity, and A/B stability, it must fail safely rather than output a convenient measurement.
+
+## Implementation Status (wire_strip)
+
+The wire robustness/auto-tuning work described above is implemented for
+`wire_strip`:
+
+- Component-level wire foreground filtering: `vision/wire_filtering.py`.
+- Setup-phase threshold sweep, scoring, and stable-platform selection:
+  `vision/wire_auto_tune.py`, exposed via `services/setup_service.py` and
+  `POST /api/setup/wire-auto-tune`. The confirmed recipe records `auto_tuned`.
+- Offline threshold sweep for analysis: `run_offline_threshold_sweep` in
+  `services/offline_validation_service.py` (per-threshold valid ratio, interval
+  stats, rejected-background stats, formal A/B span stats, distance/A/B jump
+  stats), written to `threshold_sweep_summary.json` with no absolute paths.
+
+See `docs/19_WIRE_DETECTION_ROBUSTNESS_IMPLEMENTATION.md` for the concrete
+contract and field-level details.

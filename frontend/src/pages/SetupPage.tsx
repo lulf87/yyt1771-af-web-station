@@ -6,6 +6,7 @@ import {
   freezeSetupFrame,
   getCameraStatus,
   openCamera,
+  wireAutoTune,
 } from "../api/client";
 import type {
   CameraStatus,
@@ -17,6 +18,7 @@ import type {
   SegmentationParams,
   SetupDetectResponse,
   TargetFamily,
+  WireAutoTuneResponse,
 } from "../api/types";
 import { FrameCanvas } from "../components/FrameCanvas";
 import { OfflineDatasetSelector } from "../components/OfflineDatasetSelector";
@@ -96,6 +98,8 @@ export function SetupPage({
     defaultDebugOverlayLayers,
   );
   const [detection, setDetection] = useState<SetupDetectResponse | null>(null);
+  const [autoTuneResult, setAutoTuneResult] = useState<WireAutoTuneResponse | null>(null);
+  const [autoTuned, setAutoTuned] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -160,6 +164,29 @@ export function SetupPage({
     });
   }
 
+  async function handleWireAutoTune() {
+    if (frameRef === null) {
+      setError("Freeze a frame first.");
+      return;
+    }
+
+    await runAction("auto-tune", async () => {
+      const result = await wireAutoTune({
+        frame_ref: frameRef,
+        roi,
+        recipe_name: recipeName,
+        target_family: "wire_strip",
+        segmentation,
+      });
+      setAutoTuneResult(result);
+      if (result.recommended_segmentation !== null) {
+        setSegmentation(result.recommended_segmentation);
+        setAutoTuned(true);
+      }
+      setDetection(null);
+    });
+  }
+
   async function handleConfirm() {
     await runAction("confirm", async () => {
       const response = await confirmSetup({
@@ -169,6 +196,7 @@ export function SetupPage({
         recipe_name: recipeName,
         segmentation,
         detector,
+        auto_tuned: autoTuned,
       });
       onMeasurementDefinitionConfirmed(response.measurement_definition);
     });
@@ -181,6 +209,8 @@ export function SetupPage({
     setSegmentation(defaults.segmentation);
     setDetector(defaults.detector);
     setDetection(null);
+    setAutoTuneResult(null);
+    setAutoTuned(false);
   }
 
   function handleDetectorChange(nextDetector: DetectorParams) {
@@ -318,14 +348,40 @@ export function SetupPage({
               onChange={(nextSegmentation) => {
                 setSegmentation(nextSegmentation);
                 setDetection(null);
+                setAutoTuned(false);
               }}
             />
           </section>
 
+          {targetFamily === "wire_strip" ? (
+            <section className="panel-section">
+              <h2>Wire Auto Tune</h2>
+              <p className="panel-note">
+                Setup-only: sweeps candidate thresholds and recommends the threshold on the widest
+                stable platform. The run phase always uses the confirmed recipe.
+              </p>
+              <div className="button-row compact">
+                <button
+                  disabled={frameRef === null || isBusy}
+                  onClick={handleWireAutoTune}
+                  type="button"
+                >
+                  Run wire auto tune
+                </button>
+              </div>
+              {autoTuneResult ? <WireAutoTunePanel result={autoTuneResult} /> : null}
+            </section>
+          ) : null}
+
           <section className="panel-section">
             <h2>Recipe summary</h2>
             <dl className="metric-list compact-list">
-              <RecipeSummaryRows detector={detector} segmentation={segmentation} targetFamily={targetFamily} />
+              <RecipeSummaryRows
+                autoTuned={autoTuned}
+                detector={detector}
+                segmentation={segmentation}
+                targetFamily={targetFamily}
+              />
             </dl>
           </section>
 
@@ -357,11 +413,82 @@ export function SetupPage({
   );
 }
 
+function WireAutoTunePanel({ result }: { result: WireAutoTuneResponse }) {
+  const platformText =
+    result.stable_platform_min !== null && result.stable_platform_max !== null
+      ? `${result.stable_platform_min}–${result.stable_platform_max}`
+      : "N/A";
+  return (
+    <div className="auto-tune-result">
+      <dl className="metric-list compact-list">
+        <div>
+          <dt>Recommended threshold</dt>
+          <dd>{result.recommended_threshold_value ?? "N/A"}</dd>
+        </div>
+        <div>
+          <dt>Selected reason</dt>
+          <dd>{result.selected_reason}</dd>
+        </div>
+        <div>
+          <dt>Stable platform</dt>
+          <dd>{platformText}</dd>
+        </div>
+        <div>
+          <dt>Auto tuned</dt>
+          <dd>{String(result.auto_tuned)}</dd>
+        </div>
+      </dl>
+      <table className="auto-tune-table">
+        <thead>
+          <tr>
+            <th>thr</th>
+            <th>valid</th>
+            <th>span</th>
+            <th>intervals</th>
+            <th>rejected</th>
+            <th>broad blob</th>
+            <th>wire-like</th>
+            <th>score</th>
+            <th>platform</th>
+          </tr>
+        </thead>
+        <tbody>
+          {result.candidates.map((candidate) => (
+            <tr
+              className={candidate.on_stable_platform ? "auto-tune-platform-row" : undefined}
+              key={candidate.threshold_value}
+            >
+              <td>{candidate.threshold_value}</td>
+              <td>{candidate.valid ? "yes" : "no"}</td>
+              <td>{formatNumber(candidate.formal_ab_span_px)}</td>
+              <td>{candidate.valid_interval_count ?? "N/A"}</td>
+              <td>{candidate.rejected_interval_count}</td>
+              <td>{candidate.broad_blob_rejection_count ?? "N/A"}</td>
+              <td>{formatNumber(candidate.wire_likeness_score)}</td>
+              <td>{formatNumber(candidate.score)}</td>
+              <td>{candidate.on_stable_platform ? "✓" : ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function formatNumber(value: number | null): string {
+  if (value === null || Number.isNaN(value)) {
+    return "N/A";
+  }
+  return value.toFixed(2);
+}
+
 function RecipeSummaryRows({
+  autoTuned,
   detector,
   segmentation,
   targetFamily,
 }: {
+  autoTuned: boolean;
   detector: DetectorParams;
   segmentation: SegmentationParams;
   targetFamily: TargetFamily;
@@ -385,6 +512,7 @@ function RecipeSummaryRows({
     ["Close kernel", segmentation.close_kernel],
     ["Open kernel", segmentation.open_kernel],
     ["Min area", segmentation.min_component_area_px],
+    ["Auto tuned", autoTuned],
   ];
   return (
     <>

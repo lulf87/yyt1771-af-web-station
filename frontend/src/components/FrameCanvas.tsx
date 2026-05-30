@@ -68,6 +68,10 @@ export function FrameCanvas({
     detection?.valid === true
       ? diagnosticIntervalsToSegments(detection.diagnostics.selected_valid_intervals, roi)
       : [];
+  const rejectedIntervalSegments =
+    detection !== null
+      ? diagnosticIntervalsToSegments(detection.diagnostics.rejected_intervals, roi)
+      : [];
   const rejectedA =
     detection !== null && !detection.valid
       ? diagnosticPointToCircle(detection.diagnostics.rejected_candidate_point_a)
@@ -181,6 +185,17 @@ export function FrameCanvas({
               />
             ))
           : null}
+        {rejectedIntervalSegments.map((segment, index) => (
+          <line
+            className="rejected-interval-segment"
+            key={`rej-${segment.x1}-${segment.y1}-${index}`}
+            vectorEffect="non-scaling-stroke"
+            x1={segment.x1}
+            x2={segment.x2}
+            y1={segment.y1}
+            y2={segment.y2}
+          />
+        ))}
         {selectedIntervalSegments.map((segment, index) => (
           <line
             className="selected-interval-segment"

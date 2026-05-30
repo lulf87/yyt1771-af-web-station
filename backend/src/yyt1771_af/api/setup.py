@@ -9,6 +9,8 @@ from yyt1771_af.services.setup_service import (
     SetupConfirmResponse,
     SetupDetectRequest,
     SetupDetectResponse,
+    WireAutoTuneRequest,
+    WireAutoTuneResponse,
     setup_service,
 )
 
@@ -27,6 +29,16 @@ def freeze_setup_frame(request: FreezeRequest) -> FreezeResponse:
 def detect_setup_frame(request: SetupDetectRequest) -> SetupDetectResponse:
     try:
         return setup_service.detect(request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/wire-auto-tune", response_model=WireAutoTuneResponse)
+def wire_auto_tune(request: WireAutoTuneRequest) -> WireAutoTuneResponse:
+    try:
+        return setup_service.auto_tune_wire(request)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

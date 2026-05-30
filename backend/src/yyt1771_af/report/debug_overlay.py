@@ -214,6 +214,16 @@ def render_detection_debug_overlay_png(
         pixels,
         display_width,
         scaled_roi,
+        detection.diagnostics.rejected_intervals,
+        measurement_line_y,
+        scale_x,
+        (255, 96, 96),
+        thickness=2,
+    )
+    _draw_interval_segments(
+        pixels,
+        display_width,
+        scaled_roi,
         detection.diagnostics.selected_valid_intervals,
         measurement_line_y,
         scale_x,
@@ -299,6 +309,18 @@ def render_detection_debug_overlay_png(
             58,
             f"VIRTUAL ENVELOPE DEBUG-ONLY:{detection.diagnostics.virtual_envelope_span_px:.2f}",
             (255, 174, 66),
+            scale=1,
+        )
+    wire_likeness = detection.diagnostics.wire_likeness_score
+    if wire_likeness is not None:
+        broad_blob = detection.diagnostics.broad_blob_rejection_count or 0
+        draw_text(
+            pixels,
+            display_width,
+            8,
+            58,
+            f"WIRE_LIKENESS:{wire_likeness:.2f} BROAD_BLOB_REJ:{broad_blob}",
+            (120, 255, 200),
             scale=1,
         )
     return encode_png(display_width, display_height, pixels)

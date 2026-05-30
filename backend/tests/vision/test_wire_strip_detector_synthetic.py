@@ -270,6 +270,131 @@ def test_wire_bundle_envelope_fails_when_only_one_valid_interval_is_visible() ->
     assert result.distance_px is None
 
 
+def _wire_bundle_with_broad_blob_frame() -> tuple[np.ndarray, RotatedRoi]:
+    roi = RotatedRoi(center_x=120.0, center_y=90.0, width=160.0, height=120.0, angle_deg=0.0)
+    y, x = np.indices((180, 240))
+    dx = x.astype(float) - roi.center_x
+    dy = y.astype(float) - roi.center_y
+    wires = (
+        ((dx >= -60.0) & (dx <= -54.0))
+        | ((dx >= -3.0) & (dx <= 3.0))
+        | ((dx >= 54.0) & (dx <= 60.0))
+    ) & (dy >= -50.0) & (dy <= -10.0)
+    blob = (x >= 100) & (x <= 165) & (y >= 85) & (y <= 150)
+    image = np.full((180, 240), 230, dtype=np.uint8)
+    image[wires] = 30
+    image[blob] = 120
+    return image, roi
+
+
+def _wire_bundle_with_inline_broad_blob_frame() -> tuple[np.ndarray, RotatedRoi]:
+    roi = RotatedRoi(center_x=120.0, center_y=90.0, width=200.0, height=120.0, angle_deg=0.0)
+    y, x = np.indices((180, 240))
+    dx = x.astype(float) - roi.center_x
+    dy = y.astype(float) - roi.center_y
+    wires = (
+        ((dx >= -93.0) & (dx <= -87.0))
+        | ((dx >= -53.0) & (dx <= -47.0))
+        | ((dx >= -13.0) & (dx <= -7.0))
+    ) & (np.abs(dy) <= 40.0)
+    blob = (dx >= 20.0) & (dx <= 95.0) & (np.abs(dy) <= 37.0)
+    image = np.full((180, 240), 230, dtype=np.uint8)
+    image[wires] = 30
+    image[blob] = 120
+    return image, roi
+
+
+def test_wire_bundle_envelope_excludes_inline_broad_blob_from_formal_span() -> None:
+    detector = WireStripDetector()
+    frame, roi = _wire_bundle_with_inline_broad_blob_frame()
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.valid is True
+    assert result.diagnostics.broad_blob_rejection_count >= 1
+    a_local = _local_coordinates(result.point_a.x, result.point_a.y, roi)
+    b_local = _local_coordinates(result.point_b.x, result.point_b.y, roi)
+    # A/B stay on the wire bundle; the right-side broad blob is excluded.
+    assert a_local[0] == pytest.approx(-93.0, abs=2.0)
+    assert b_local[0] == pytest.approx(-7.0, abs=2.0)
+    assert result.diagnostics.formal_ab_span_px is not None
+    assert result.diagnostics.formal_ab_span_px == pytest.approx(86.0, abs=3.0)
+    assert result.diagnostics.rejected_interval_reasons is not None
+    assert "broad_blob" in result.diagnostics.rejected_interval_reasons
+
+
+def test_wire_bundle_envelope_reports_phase1_diagnostics() -> None:
+    detector = WireStripDetector()
+    roi = _wire_pair_roi(angle_deg=0.0)
+
+    result = detector.detect(
+        frame=_wire_bundle_frame(roi),
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.valid is True
+    assert result.diagnostics.threshold_mode == "fixed"
+    assert result.diagnostics.configured_polarity == "dark_on_light"
+    assert result.diagnostics.close_kernel == 1
+    assert result.diagnostics.open_kernel == 1
+    assert result.diagnostics.min_component_area_px == 20
+    assert result.diagnostics.wire_likeness_score is not None
+    assert result.diagnostics.component_aspect_ratio is not None
+    assert result.diagnostics.component_orientation is not None
+    assert result.diagnostics.neighbor_line_support is not None
+    assert result.diagnostics.broad_blob_rejection_count == 0
+
+
+def test_wire_bundle_envelope_flags_broad_background_blob_without_changing_ab() -> None:
+    detector = WireStripDetector()
+    frame, roi = _wire_bundle_with_broad_blob_frame()
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.valid is True
+    assert result.diagnostics.broad_blob_rejection_count is not None
+    assert result.diagnostics.broad_blob_rejection_count >= 1
+    assert result.diagnostics.broad_blob_area_ratio is not None
+    assert result.diagnostics.broad_blob_area_ratio >= 0.2
+    a_local = _local_coordinates(result.point_a.x, result.point_a.y, roi)
+    b_local = _local_coordinates(result.point_b.x, result.point_b.y, roi)
+    assert a_local[0] == pytest.approx(-60.0, abs=1.5)
+    assert b_local[0] == pytest.approx(60.0, abs=1.5)
+
+
 def test_wire_bundle_envelope_selects_current_frame_largest_span_without_previous_prior() -> None:
     detector = WireStripDetector()
     roi = _wire_pair_roi(angle_deg=0.0)

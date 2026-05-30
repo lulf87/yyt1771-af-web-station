@@ -289,6 +289,67 @@ def test_wire_run_uses_wire_detector_for_every_sample(
         assert detection["point_b"]["coordinate_space"] == "acquisition"
 
 
+def test_wire_run_applies_auto_tuned_recipe_without_retuning(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("YYT1771_AF_RUNS_DIR", str(tmp_path))
+    client = TestClient(app)
+    client.post("/api/camera/open", json={"profile": "dev_mock"})
+    confirm_response = client.post(
+        "/api/setup/confirm",
+        json={
+            "name": "auto-tuned-wire-run",
+            "target_family": "wire_strip",
+            "roi": {
+                "center_x": 235.0,
+                "center_y": 110.0,
+                "width": 55.0,
+                "height": 150.0,
+                "angle_deg": 90.0,
+                "coordinate_space": "acquisition",
+            },
+            "recipe_name": "wire_strip_default",
+            "segmentation": {
+                "polarity": "dark_on_light",
+                "threshold_mode": "fixed",
+                "threshold_value": 132,
+                "blur_kernel": 3,
+                "close_kernel": 3,
+                "open_kernel": 1,
+                "min_component_area_px": 30,
+                "fill_internal_holes": False,
+            },
+            "auto_tuned": True,
+        },
+    )
+    assert confirm_response.status_code == 200
+    measurement_definition_id = confirm_response.json()["measurement_definition_id"]
+
+    run_id = client.post(
+        "/api/runs/start",
+        json={
+            "measurement_definition_id": measurement_definition_id,
+            "sample_hz": 1000.0,
+            "sample_count": 2,
+        },
+    ).json()["run_id"]
+
+    measurement_definition = json.loads(
+        (tmp_path / run_id / "measurement_definition.json").read_text(encoding="utf-8")
+    )
+    assert measurement_definition["auto_tuned"] is True
+    assert measurement_definition["segmentation"]["threshold_mode"] == "fixed"
+    assert measurement_definition["segmentation"]["threshold_value"] == 132
+
+    samples = client.get(f"/api/runs/{run_id}/samples").json()["samples"]
+    assert len(samples) == 2
+    for sample in samples:
+        diagnostics = sample["detection"]["diagnostics"]
+        assert diagnostics["detector"] == "wire_strip_detector"
+        assert diagnostics["threshold_mode"] == "fixed"
+
+
 def test_run_samples_keep_invalid_status_without_fake_distance(
     monkeypatch,
     tmp_path: Path,

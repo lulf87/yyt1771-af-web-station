@@ -15,6 +15,7 @@ import {
   setTemperaturePower,
   setTemperatureTarget,
   startRun,
+  wireAutoTune,
 } from "./client";
 
 describe("setup API client", () => {
@@ -229,6 +230,52 @@ describe("setup API client", () => {
     expect(posted.detector.envelope_mode).toBe("open_mesh");
     expect(posted.detector.contact_source).toBe("bridged_foreground");
     expect(posted.segmentation.threshold_value).toBe(160);
+  });
+
+  it("posts a wire auto tune request to the setup endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        target_family: "wire_strip",
+        recommended_threshold_value: 120,
+        recommended_polarity: "dark_on_light",
+        recommended_segmentation: null,
+        stable_platform_min: 100,
+        stable_platform_max: 140,
+        selected_reason: "stable_platform",
+        auto_tuned: true,
+        candidates: [],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await wireAutoTune({
+      frame_ref: {
+        frame_id: 1,
+        timestamp_ms: 100,
+        width: 320,
+        height: 220,
+        coordinate_space: "acquisition",
+      },
+      roi: {
+        center_x: 235,
+        center_y: 110,
+        width: 55,
+        height: 150,
+        angle_deg: 90,
+        coordinate_space: "acquisition",
+      },
+      recipe_name: "wire_strip_default",
+      target_family: "wire_strip",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/setup/wire-auto-tune",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const posted = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(posted.target_family).toBe("wire_strip");
+    expect(posted.recipe_name).toBe("wire_strip_default");
   });
 
   it("reports backend export failures without computing export data", async () => {

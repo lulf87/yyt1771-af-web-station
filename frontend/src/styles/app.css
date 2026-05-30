@@ -239,6 +239,40 @@ select {
   opacity: 0.82;
 }
 
+.rejected-interval-segment {
+  stroke: #f87171;
+  stroke-width: 3;
+  stroke-dasharray: 4 3;
+  opacity: 0.85;
+}
+
+.auto-tune-result {
+  margin-top: 0.5rem;
+}
+
+.auto-tune-table {
+  width: 100%;
+  margin-top: 0.5rem;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+
+.auto-tune-table th,
+.auto-tune-table td {
+  padding: 2px 4px;
+  text-align: right;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.auto-tune-table th:first-child,
+.auto-tune-table td:first-child {
+  text-align: left;
+}
+
+.auto-tune-platform-row {
+  background: rgba(34, 197, 94, 0.16);
+}
+
 .point {
   stroke: #ffffff;
   stroke-width: 1.5;

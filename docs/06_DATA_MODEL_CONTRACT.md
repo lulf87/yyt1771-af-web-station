@@ -189,10 +189,18 @@ class DetectionDiagnostics(BaseModel):
     raw_intervals: list[dict] | None = None
     bridged_intervals: list[dict] | None = None
     selected_valid_intervals: list[dict] | None = None
+    rejected_intervals: list[dict] | None = None
+    rejected_interval_reasons: list[str] | None = None
     leftmost_valid_interval: dict | None = None
     rightmost_valid_interval: dict | None = None
     formal_point_a_source_interval: dict | None = None
     formal_point_b_source_interval: dict | None = None
+    broad_blob_rejection_count: int | None = None
+    broad_blob_area_ratio: float | None = None
+    wire_likeness_score: float | None = None
+    component_aspect_ratio: float | None = None
+    component_orientation: float | None = None
+    neighbor_line_support: int | None = None
     point_a_on_foreground_boundary: bool | None = None
     point_b_on_foreground_boundary: bool | None = None
     point_a_source_layer: str | None = None
@@ -269,8 +277,13 @@ class MeasurementDefinition(BaseModel):
     detector_version: str = "v1"
     acquisition_frame_size: AcquisitionFrameSize
     coordinate_space: CoordinateSpace = CoordinateSpace.ACQUISITION
+    auto_tuned: bool = False
     created_at_ms: int
 ```
+
+`auto_tuned` is `True` only when the confirmed `segmentation.threshold_value` came
+from the setup-phase Wire Auto Tune sweep (see `docs/19`). It is metadata for
+traceability; the run phase always applies the confirmed recipe verbatim.
 
 Run-time detection must use this confirmed `segmentation` and `detector` snapshot. It must not silently reload default detector params from `recipe_name`.
 
