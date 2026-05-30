@@ -12,12 +12,14 @@ import type {
   DetectorParams,
   FrameRef,
   MeasurementDefinition,
+  OfflineDataset,
   RotatedRoi,
   SegmentationParams,
   SetupDetectResponse,
   TargetFamily,
 } from "../api/types";
 import { FrameCanvas } from "../components/FrameCanvas";
+import { OfflineDatasetSelector } from "../components/OfflineDatasetSelector";
 import { RoiEditor } from "../components/RoiEditor";
 import { SegmentationControls } from "../components/SegmentationControls";
 import { StatusPanel } from "../components/StatusPanel";
@@ -67,10 +69,18 @@ const debugOverlayLayerFields: Array<{
 ];
 
 interface SetupPageProps {
+  datasets: OfflineDataset[];
+  datasetId: string;
+  onDatasetChange: (datasetId: string) => void;
   onMeasurementDefinitionConfirmed: (measurementDefinition: MeasurementDefinition) => void;
 }
 
-export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) {
+export function SetupPage({
+  datasets,
+  datasetId,
+  onDatasetChange,
+  onMeasurementDefinitionConfirmed,
+}: SetupPageProps) {
   const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null);
   const [frameRef, setFrameRef] = useState<FrameRef | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -101,7 +111,7 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
 
   async function openSource(profile: "dev_mock" | "dev_offline" | "dev_lab") {
     await runAction(`open-${profile}`, async () => {
-      await openCamera(profile);
+      await openCamera(profile, profile === "dev_offline" ? datasetId || null : null);
       await refreshStatus();
       setFrameRef(null);
       setPreviewUrl(null);
@@ -264,6 +274,12 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
               Static mock is only a smoke test; offline source uses local .npy frames; lab source
               uses the optional Hik MVS adapter.
             </p>
+            <OfflineDatasetSelector
+              datasets={datasets}
+              disabled={isBusy}
+              onChange={onDatasetChange}
+              value={datasetId}
+            />
             <div className="button-row compact">
               <button disabled={isBusy} onClick={handleOpenMock} type="button">
                 Open mock source

@@ -15,6 +15,7 @@ router = APIRouter(prefix="/camera", tags=["camera"])
 
 class CameraOpenRequest(BaseModel):
     profile: str = "dev_mock"
+    dataset_id: str | None = None
 
 
 class CameraCloseResponse(BaseModel):
@@ -24,7 +25,7 @@ class CameraCloseResponse(BaseModel):
 @router.post("/open", response_model=CameraOpenResult)
 def open_camera(request: CameraOpenRequest) -> CameraOpenResult:
     try:
-        return camera_service.open(request.profile)
+        return camera_service.open(request.profile, dataset_id=request.dataset_id)
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

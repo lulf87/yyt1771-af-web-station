@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
+from yyt1771_af.services.offline_datasets import (
+    OfflineDatasetInfo,
+    list_offline_dataset_infos,
+)
 from yyt1771_af.services.offline_run_service import (
     OfflineRunCloseResponse,
     OfflineRunFrameResponse,
@@ -13,6 +17,11 @@ from yyt1771_af.services.offline_run_service import (
 )
 
 router = APIRouter(prefix="/offline-run", tags=["offline-run"])
+
+
+@router.get("/datasets", response_model=list[OfflineDatasetInfo])
+def list_offline_datasets() -> list[OfflineDatasetInfo]:
+    return list_offline_dataset_infos()
 
 
 @router.post("/open", response_model=OfflineRunOpenResponse)

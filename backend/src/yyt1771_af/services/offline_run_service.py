@@ -25,6 +25,7 @@ from yyt1771_af.services.frame_preview_service import (
     build_frame_preview_metadata,
     build_frame_preview_png,
 )
+from yyt1771_af.services.offline_datasets import resolve_offline_dataset_dir
 from yyt1771_af.services.setup_service import _serialize_detection_result, setup_service
 from yyt1771_af.vision.detection import detect_target
 
@@ -32,6 +33,7 @@ from yyt1771_af.vision.detection import detect_target
 class OfflineRunOpenRequest(BaseModel):
     measurement_definition_id: str
     frames_dir: Path | None = None
+    dataset_id: str | None = None
     fps: float = Field(default=10.0, gt=0.0)
     loop: bool = True
     dataset_label: str | None = None
@@ -114,7 +116,7 @@ class OfflineRunService:
         self._max_cached_frames = max(1, max_cached_frames)
 
     def open(self, request: OfflineRunOpenRequest) -> OfflineRunOpenResponse:
-        frames_dir = _resolve_frames_dir(request.frames_dir)
+        frames_dir = _resolve_frames_dir(request.frames_dir, request.dataset_id)
         source = OfflineFolderCameraSource(frames_dir, loop=request.loop)
         source.open()
         frame_paths = source.frame_paths
@@ -364,7 +366,9 @@ class OfflineRunService:
         return session
 
 
-def _resolve_frames_dir(frames_dir: Path | None) -> Path:
+def _resolve_frames_dir(frames_dir: Path | None, dataset_id: str | None = None) -> Path:
+    if dataset_id is not None and dataset_id.strip() != "":
+        return resolve_offline_dataset_dir(dataset_id)
     value = frames_dir or os.environ.get("YYT1771_AF_OFFLINE_DIR")
     if value is None:
         raise FileNotFoundError("offline frames directory is not available")

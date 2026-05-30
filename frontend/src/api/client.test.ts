@@ -86,7 +86,7 @@ describe("setup API client", () => {
       "/api/camera/open",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ profile: "dev_lab" }),
+        body: JSON.stringify({ profile: "dev_lab", dataset_id: null }),
       }),
     );
   });

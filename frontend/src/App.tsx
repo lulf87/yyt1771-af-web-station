@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import type { MeasurementDefinition } from "./api/types";
+import { listOfflineDatasets } from "./api/client";
+import type { MeasurementDefinition, OfflineDataset } from "./api/types";
 import { AnalysisPage } from "./pages/AnalysisPage";
 import { PlaybackPage } from "./pages/PlaybackPage";
 import { RunPage } from "./pages/RunPage";
@@ -12,6 +13,32 @@ export default function App() {
   const [page, setPage] = useState<Page>("setup");
   const [measurementDefinition, setMeasurementDefinition] =
     useState<MeasurementDefinition | null>(null);
+  const [datasets, setDatasets] = useState<OfflineDataset[]>([]);
+  const [datasetId, setDatasetId] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const available = await listOfflineDatasets();
+        if (cancelled) {
+          return;
+        }
+        setDatasets(available);
+        const firstAvailable = available.find((dataset) => dataset.available);
+        if (firstAvailable) {
+          setDatasetId(firstAvailable.dataset_id);
+        }
+      } catch {
+        if (!cancelled) {
+          setDatasets([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function handleMeasurementDefinitionConfirmed(nextDefinition: MeasurementDefinition) {
     setMeasurementDefinition(nextDefinition);
@@ -55,11 +82,26 @@ export default function App() {
         </button>
       </nav>
       {page === "setup" ? (
-        <SetupPage onMeasurementDefinitionConfirmed={handleMeasurementDefinitionConfirmed} />
+        <SetupPage
+          datasets={datasets}
+          datasetId={datasetId}
+          onDatasetChange={setDatasetId}
+          onMeasurementDefinitionConfirmed={handleMeasurementDefinitionConfirmed}
+        />
       ) : page === "run" ? (
-        <RunPage measurementDefinition={measurementDefinition} />
+        <RunPage
+          datasets={datasets}
+          datasetId={datasetId}
+          measurementDefinition={measurementDefinition}
+          onDatasetChange={setDatasetId}
+        />
       ) : page === "playback" ? (
-        <PlaybackPage measurementDefinition={measurementDefinition} />
+        <PlaybackPage
+          datasets={datasets}
+          datasetId={datasetId}
+          measurementDefinition={measurementDefinition}
+          onDatasetChange={setDatasetId}
+        />
       ) : (
         <AnalysisPage />
       )}

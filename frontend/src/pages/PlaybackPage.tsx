@@ -9,16 +9,21 @@ import {
 import type {
   FrameRef,
   MeasurementDefinition,
+  OfflineDataset,
   OfflinePlaybackFrame,
   OfflinePlaybackStatus,
   RotatedRoi,
   TargetFamily,
 } from "../api/types";
 import { FrameCanvas } from "../components/FrameCanvas";
+import { OfflineDatasetSelector } from "../components/OfflineDatasetSelector";
 import { StatusPanel } from "../components/StatusPanel";
 import { TargetFamilySelector } from "../components/TargetFamilySelector";
 
 interface PlaybackPageProps {
+  datasets: OfflineDataset[];
+  datasetId: string;
+  onDatasetChange: (datasetId: string) => void;
   measurementDefinition: MeasurementDefinition | null;
 }
 
@@ -31,7 +36,12 @@ const defaultRoi: RotatedRoi = {
   coordinate_space: "acquisition",
 };
 
-export function PlaybackPage({ measurementDefinition }: PlaybackPageProps) {
+export function PlaybackPage({
+  datasets,
+  datasetId,
+  onDatasetChange,
+  measurementDefinition,
+}: PlaybackPageProps) {
   const [framesDir, setFramesDir] = useState("");
   const [evaluationDir, setEvaluationDir] = useState("");
   const [datasetLabel, setDatasetLabel] = useState("");
@@ -75,6 +85,7 @@ export function PlaybackPage({ measurementDefinition }: PlaybackPageProps) {
     await runAction("open-playback", async () => {
       const opened = await openOfflinePlayback({
         frames_dir: framesDir.trim() || null,
+        dataset_id: framesDir.trim() ? null : datasetId || null,
         evaluation_output_dir: evaluationDir.trim() || null,
         dataset_label: datasetLabel.trim() || null,
         target_family: targetFamily,
@@ -154,8 +165,14 @@ export function PlaybackPage({ measurementDefinition }: PlaybackPageProps) {
         <aside className="setup-panel" aria-label="Playback controls">
           <section className="panel-section">
             <h2>Source</h2>
+            <OfflineDatasetSelector
+              datasets={datasets}
+              disabled={isBusy}
+              onChange={onDatasetChange}
+              value={datasetId}
+            />
             <label className="stacked-field">
-              <span>Frames dir</span>
+              <span>Frames dir (overrides material)</span>
               <input
                 onChange={(event) => setFramesDir(event.currentTarget.value)}
                 placeholder="YYT1771_AF_OFFLINE_DIR"

@@ -20,6 +20,7 @@ from yyt1771_af.services.frame_preview_service import (
     build_frame_preview_metadata,
     build_frame_preview_png,
 )
+from yyt1771_af.services.offline_datasets import resolve_offline_dataset_dir
 
 
 class CameraOpenResult(BaseModel):
@@ -45,9 +46,9 @@ class CameraService:
         self._pinned_frame_ids: set[int] = set()
         self._max_cached_frames = max(1, max_cached_frames)
 
-    def open(self, profile: str) -> CameraOpenResult:
+    def open(self, profile: str, *, dataset_id: str | None = None) -> CameraOpenResult:
         self.close()
-        self._source = self._source_for_profile(profile)
+        self._source = self._source_for_profile(profile, dataset_id=dataset_id)
         self._source.open()
         self._source_type = getattr(self._source, "source_type", profile)
         self._latest_frame = self._initial_frame(self._source)
@@ -162,7 +163,12 @@ class CameraService:
             max_height=max_height,
         )
 
-    def _source_for_profile(self, profile: str) -> CameraSource:
+    def _source_for_profile(
+        self,
+        profile: str,
+        *,
+        dataset_id: str | None = None,
+    ) -> CameraSource:
         profile_reference = _profile_reference(profile)
         profile_config = load_camera_profile_config(profile_reference)
         camera_config = profile_config.camera
@@ -170,15 +176,20 @@ class CameraService:
         if camera_type == "mock":
             return MockCameraSource()
         if camera_type == "offline_folder":
+            loop_value = os.environ.get("YYT1771_AF_OFFLINE_LOOP")
+            loop = (
+                _truthy(loop_value) if loop_value is not None else bool(camera_config.get("loop"))
+            )
+            if dataset_id is not None and dataset_id.strip() != "":
+                return OfflineFolderCameraSource(
+                    resolve_offline_dataset_dir(dataset_id),
+                    loop=loop,
+                )
             folder_value = os.environ.get("YYT1771_AF_OFFLINE_DIR") or camera_config.get(
                 "image_folder"
             )
             if folder_value is None:
                 raise FileNotFoundError("YYT1771_AF_OFFLINE_DIR is required for dev_offline")
-            loop_value = os.environ.get("YYT1771_AF_OFFLINE_LOOP")
-            loop = (
-                _truthy(loop_value) if loop_value is not None else bool(camera_config.get("loop"))
-            )
             return OfflineFolderCameraSource(
                 resolve_configured_path(Path(str(folder_value))),
                 loop=loop,

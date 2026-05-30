@@ -5,6 +5,7 @@ import type {
   ExportFormat,
   FramePreviewMetadata,
   FreezeResponse,
+  OfflineDataset,
   OfflinePlaybackFrame,
   OfflinePlaybackOpenRequest,
   OfflinePlaybackStatus,
@@ -28,11 +29,18 @@ import type {
   TemperatureReading,
 } from "./types";
 
-export async function openCamera(profile = "dev_mock"): Promise<CameraOpenResponse> {
+export async function openCamera(
+  profile = "dev_mock",
+  datasetId: string | null = null,
+): Promise<CameraOpenResponse> {
   return requestJson<CameraOpenResponse>("/api/camera/open", {
     method: "POST",
-    body: JSON.stringify({ profile }),
+    body: JSON.stringify({ profile, dataset_id: datasetId }),
   });
+}
+
+export async function listOfflineDatasets(): Promise<OfflineDataset[]> {
+  return requestJson<OfflineDataset[]>("/api/offline-run/datasets");
 }
 
 export async function getCameraStatus(): Promise<CameraStatus> {

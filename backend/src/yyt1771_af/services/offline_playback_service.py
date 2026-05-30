@@ -22,6 +22,7 @@ from yyt1771_af.services.frame_preview_service import (
     build_frame_preview_metadata,
     build_frame_preview_png,
 )
+from yyt1771_af.services.offline_datasets import resolve_offline_dataset_dir
 from yyt1771_af.services.setup_service import (
     _detector_params_for_target,
     _segmentation_for_target,
@@ -32,6 +33,7 @@ from yyt1771_af.vision.detection import detect_target
 
 class OfflinePlaybackOpenRequest(BaseModel):
     frames_dir: Path | None = None
+    dataset_id: str | None = None
     target_family: TargetFamily
     roi: RotatedRoi
     fps: float = Field(default=10.0, gt=0.0)
@@ -97,7 +99,7 @@ class OfflinePlaybackService:
         self._session: _OfflinePlaybackSession | None = None
 
     def open(self, request: OfflinePlaybackOpenRequest) -> OfflinePlaybackStatusResponse:
-        frames_dir = _resolve_frames_dir(request.frames_dir)
+        frames_dir = _resolve_frames_dir(request.frames_dir, request.dataset_id)
         frame_paths = list_offline_frame_files(frames_dir)
         if not frame_paths:
             raise FileNotFoundError("offline playback frames directory has no supported frames")
@@ -275,7 +277,9 @@ class OfflinePlaybackService:
         return self._session
 
 
-def _resolve_frames_dir(frames_dir: Path | None) -> Path:
+def _resolve_frames_dir(frames_dir: Path | None, dataset_id: str | None = None) -> Path:
+    if dataset_id is not None and dataset_id.strip() != "":
+        return resolve_offline_dataset_dir(dataset_id)
     value = frames_dir or os.environ.get("YYT1771_AF_OFFLINE_DIR")
     if value is None:
         raise FileNotFoundError("YYT1771_AF_OFFLINE_DIR is required for offline playback")

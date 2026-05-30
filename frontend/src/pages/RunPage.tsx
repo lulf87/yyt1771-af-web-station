@@ -15,17 +15,22 @@ import type {
   CameraStatus,
   FrameRef,
   MeasurementDefinition,
+  OfflineDataset,
   OfflineRunFrame,
   OfflineRunOpenResponse,
   RunSample,
   RunStatusResponse,
 } from "../api/types";
 import { FrameCanvas } from "../components/FrameCanvas";
+import { OfflineDatasetSelector } from "../components/OfflineDatasetSelector";
 import { StatusPanel } from "../components/StatusPanel";
 import { TemperaturePanel } from "../components/TemperaturePanel";
 import { latestSample, sampleRows } from "../run/sampleDisplay";
 
 interface RunPageProps {
+  datasets: OfflineDataset[];
+  datasetId: string;
+  onDatasetChange: (datasetId: string) => void;
   measurementDefinition: MeasurementDefinition | null;
 }
 
@@ -40,7 +45,12 @@ const fallbackRoi = {
   coordinate_space: "acquisition" as const,
 };
 
-export function RunPage({ measurementDefinition }: RunPageProps) {
+export function RunPage({
+  datasets,
+  datasetId,
+  onDatasetChange,
+  measurementDefinition,
+}: RunPageProps) {
   const [runMode, setRunMode] = useState<RunMode>("live_offline");
   const [runStatus, setRunStatus] = useState<RunStatusResponse | null>(null);
   const [samples, setSamples] = useState<RunSample[]>([]);
@@ -156,6 +166,7 @@ export function RunPage({ measurementDefinition }: RunPageProps) {
       const opened = await openOfflineRun({
         measurement_definition_id: measurementDefinition.measurement_definition_id,
         frames_dir: null,
+        dataset_id: datasetId || null,
         fps: liveFps,
         loop: liveLoop,
         dataset_label: null,
@@ -363,6 +374,8 @@ export function RunPage({ measurementDefinition }: RunPageProps) {
           ) : (
             <LiveOfflineRunControls
               currentIndex={currentLiveIndex}
+              datasetId={datasetId}
+              datasets={datasets}
               distance={activeDetection?.distance_px ?? null}
               error={error}
               fps={liveFps}
@@ -373,6 +386,7 @@ export function RunPage({ measurementDefinition }: RunPageProps) {
               maxIndex={maxLiveIndex}
               measurementDefinition={measurementDefinition}
               onClose={handleCloseLive}
+              onDatasetChange={onDatasetChange}
               onFpsChange={setLiveFps}
               onLoopChange={setLiveLoop}
               onNext={handleLiveNext}
@@ -505,6 +519,8 @@ function BatchRunControls({
 
 function LiveOfflineRunControls({
   currentIndex,
+  datasetId,
+  datasets,
   distance,
   error,
   fps,
@@ -515,6 +531,7 @@ function LiveOfflineRunControls({
   maxIndex,
   measurementDefinition,
   onClose,
+  onDatasetChange,
   onFpsChange,
   onLoopChange,
   onNext,
@@ -527,6 +544,8 @@ function LiveOfflineRunControls({
   status,
 }: {
   currentIndex: number;
+  datasetId: string;
+  datasets: OfflineDataset[];
   distance: number | null;
   error: string | null;
   fps: number;
@@ -537,6 +556,7 @@ function LiveOfflineRunControls({
   maxIndex: number;
   measurementDefinition: MeasurementDefinition | null;
   onClose: () => void;
+  onDatasetChange: (datasetId: string) => void;
   onFpsChange: (fps: number) => void;
   onLoopChange: (loop: boolean) => void;
   onNext: () => void;
@@ -555,8 +575,15 @@ function LiveOfflineRunControls({
       <section className="panel-section">
         <h2>Live Offline Run</h2>
         <p className="panel-note">
-          Uses YYT1771_AF_OFFLINE_DIR by default and locks the confirmed ROI and recipe.
+          Pick a simulation material, or use YYT1771_AF_OFFLINE_DIR by default. The confirmed ROI
+          and recipe stay locked.
         </p>
+        <OfflineDatasetSelector
+          datasets={datasets}
+          disabled={isBusy || hasSession}
+          onChange={onDatasetChange}
+          value={datasetId}
+        />
         <div className="button-row compact">
           <button
             className="primary"

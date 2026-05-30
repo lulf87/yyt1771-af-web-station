@@ -125,6 +125,32 @@ curl -X POST http://127.0.0.1:8000/api/camera/open \
 
 If no `serial_number` or `device_ip` selector is configured, the adapter opens the first discovered GigE camera. The adapter currently converts `Mono8` frames into acquisition-coordinate grayscale frames for the existing preview, setup, and run flows.
 
+## Simulation material datasets (selectable in the UI)
+
+The Setup, Run, and Playback pages can switch between several named offline
+"simulation materials". Datasets are declared in a local, git-ignored config file
+so absolute paths never enter committed source:
+
+```text
+configs/local/offline_datasets.local.json
+```
+
+```json
+{
+  "datasets": [
+    { "id": "20260522-183158-dev_lab", "label": "20260522 dev_lab", "frames_dir": "/abs/path/to/20260522-183158-dev_lab/frames" },
+    { "id": "20260529-194304-dev_lab", "label": "20260529 dev_lab", "frames_dir": "/abs/path/to/20260529-194304-dev_lab/frames" }
+  ]
+}
+```
+
+`frames_dir` should point at the folder that directly contains the `.npy`/`.pgm`
+frames. The selected dataset is sent to the backend by `id` (via
+`GET /api/offline-run/datasets`), so absolute paths are not exposed over the API.
+Set `YYT1771_AF_OFFLINE_DATASETS_FILE` to use a different config location. When no
+dataset config exists, the UI falls back to the single `YYT1771_AF_OFFLINE_DIR`
+folder described below.
+
 ## Offline Real-Capture Validation
 
 Set the local offline frame folder through an environment variable. The path is local-only and must not be committed:

@@ -49,7 +49,12 @@ const measurementDefinition: MeasurementDefinition = {
 describe("RunPage live offline mode", () => {
   it("keeps batch run and exposes live offline controls", () => {
     const markup = renderToStaticMarkup(
-      <RunPage measurementDefinition={measurementDefinition} />,
+      <RunPage
+        datasets={[]}
+        datasetId=""
+        measurementDefinition={measurementDefinition}
+        onDatasetChange={() => {}}
+      />,
     );
 
     expect(markup).toContain("Batch Run");

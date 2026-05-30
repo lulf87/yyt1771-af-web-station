@@ -262,8 +262,15 @@ export interface RunSamplesResponse {
   samples: RunSample[];
 }
 
+export interface OfflineDataset {
+  dataset_id: string;
+  label: string;
+  available: boolean;
+}
+
 export interface OfflinePlaybackOpenRequest {
   frames_dir?: string | null;
+  dataset_id?: string | null;
   evaluation_output_dir?: string | null;
   dataset_label?: string | null;
   target_family: TargetFamily;
@@ -302,6 +309,7 @@ export interface OfflinePlaybackStatus {
 export interface OfflineRunOpenRequest {
   measurement_definition_id: string;
   frames_dir?: string | null;
+  dataset_id?: string | null;
   fps: number;
   loop: boolean;
   dataset_label?: string | null;
