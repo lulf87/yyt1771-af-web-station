@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RunStartRequest, SetupConfirmRequest, SetupDetectRequest } from "./types";
 import {
+  ApiRequestError,
   confirmSetup,
   detectSetupFrame,
   downloadRunExport,
@@ -174,6 +175,32 @@ describe("setup API client", () => {
       "/api/offline-run/offline_run_1/close",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("throws structured live offline run API errors", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () =>
+        JSON.stringify({
+          error_code: "unsupported_frame_format",
+          message: "offline frame format is not supported",
+          state: "error",
+          session_id: "offline_run_1",
+          frame_index: 7,
+          frame_name: "frame_000008.npy",
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(nextOfflineRun("offline_run_1")).rejects.toMatchObject({
+      name: "ApiRequestError",
+      errorCode: "unsupported_frame_format",
+      status: 400,
+      sessionId: "offline_run_1",
+      frameIndex: 7,
+      frameName: "frame_000008.npy",
+    } satisfies Partial<ApiRequestError>);
   });
 
   it("posts complete detector recipe snapshot when confirming setup", async () => {

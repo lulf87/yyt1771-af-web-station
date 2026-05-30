@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, replace
 
 import numpy as np
@@ -421,11 +422,28 @@ def select_roi_local_chord_contacts_debug(
     reject_global_foreground_boundary: bool = True,
     max_internal_gap_px: float | None = None,
     compute_debug_intervals: bool = True,
+    timings_ms: dict[str, float] | None = None,
 ) -> ContactSelection | ContactRejection:
+    line_scan_start = time.perf_counter()
+    candidate_scoring_ms = 0.0
+
+    def _finish_timing() -> None:
+        if timings_ms is None:
+            return
+        timings_ms["candidate_scoring_ms"] = round(candidate_scoring_ms, 3)
+        timings_ms["line_scan_ms"] = round(
+            max(
+                0.0,
+                (time.perf_counter() - line_scan_start) * 1000.0 - candidate_scoring_ms,
+            ),
+            3,
+        )
+
     foreground = np.asarray(mask, dtype=bool)
     edge_mask = contour_mask(foreground)
     contour_count = int(np.count_nonzero(edge_mask))
     if not np.any(foreground):
+        _finish_timing()
         return ContactRejection(
             status=DetectionStatus.TARGET_NOT_FOUND,
             debug=_chord_debug(
@@ -471,6 +489,7 @@ def select_roi_local_chord_contacts_debug(
         intervals = _line_intervals(line_mask, local_x_values, local_y)
         if not intervals:
             continue
+        scoring_start = time.perf_counter()
         if allow_mesh_outer_span:
             candidate = _build_mesh_outer_span_candidate(
                 foreground=foreground,
@@ -502,6 +521,7 @@ def select_roi_local_chord_contacts_debug(
                 measurement_mode=measurement_mode,
                 contour_point_count=contour_count,
             )
+        candidate_scoring_ms += (time.perf_counter() - scoring_start) * 1000.0
         if candidate is None:
             # Debug intervals are attached lazily to the winning candidate only.
             mismatched.append(
@@ -548,6 +568,7 @@ def select_roi_local_chord_contacts_debug(
                     if rejected_boundary
                     else candidate
                 )
+                _finish_timing()
                 return ContactRejection(
                     status=DetectionStatus.CALIPER_CONTACT_ON_ROI_BOUNDARY,
                     debug=_candidate_to_debug(
@@ -561,29 +582,29 @@ def select_roi_local_chord_contacts_debug(
                         boundary_margin_px,
                     ),
                 )
+        _finish_timing()
         return _candidate_to_selection(_attach_debug_intervals(candidate))
     if rejected_boundary:
         candidate = _best_line_candidate(
             rejected_boundary,
             prefer_largest_formal_span=prefer_largest_formal_span,
         )
+        _finish_timing()
         return ContactRejection(
             status=DetectionStatus.CALIPER_CONTACT_ON_ROI_BOUNDARY,
-            debug=_candidate_to_debug(
-                _attach_debug_intervals(candidate), roi, boundary_margin_px
-            ),
+            debug=_candidate_to_debug(_attach_debug_intervals(candidate), roi, boundary_margin_px),
         )
     if mismatched:
         candidate = _best_line_candidate(
             mismatched,
             prefer_largest_formal_span=prefer_largest_formal_span,
         )
+        _finish_timing()
         return ContactRejection(
             status=DetectionStatus.OBJECT_INTERVAL_COUNT_MISMATCH,
-            debug=_candidate_to_debug(
-                _attach_debug_intervals(candidate), roi, boundary_margin_px
-            ),
+            debug=_candidate_to_debug(_attach_debug_intervals(candidate), roi, boundary_margin_px),
         )
+    _finish_timing()
     return ContactRejection(
         status=DetectionStatus.PATTERN_NOT_FOUND,
         debug=_chord_debug(

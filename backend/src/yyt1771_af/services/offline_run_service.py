@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import time
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -107,6 +107,73 @@ class OfflineRunCloseResponse(BaseModel):
     closed: bool
 
 
+class OfflineRunErrorResponse(BaseModel):
+    error_code: str
+    message: str
+    state: str = "error"
+    session_id: str | None = None
+    frame_index: int | None = None
+    frame_name: str | None = None
+
+
+class OfflineRunTraceEntry(BaseModel):
+    frame_index: int | None = None
+    frame_name: str | None = None
+    status: str
+    valid: bool
+    distance_px: float | None = None
+    measurement_line_y: float | None = None
+    formal_ab_span_px: float | None = None
+    selected_valid_intervals: list[dict[str, float | None]] | None = None
+    point_a: dict[str, Any] | None = None
+    point_b: dict[str, Any] | None = None
+    point_a_on_foreground_boundary: bool | None = None
+    point_b_on_foreground_boundary: bool | None = None
+    distance_jump_from_previous: float | None = None
+    abs_distance_jump_from_previous: float | None = None
+    measurement_line_y_delta_from_previous: float | None = None
+    point_a_jump_from_previous: float | None = None
+    point_b_jump_from_previous: float | None = None
+    is_top_jump_candidate: bool | None = None
+    jump_warning: str | None = None
+    timings_ms: dict[str, float] = Field(default_factory=dict)
+    error_code: str | None = None
+
+
+class OfflineRunTraceResponse(BaseModel):
+    session_id: str
+    traces: list[OfflineRunTraceEntry]
+
+
+class OfflineRunRequestError(Exception):
+    def __init__(
+        self,
+        *,
+        error_code: str,
+        message: str,
+        status_code: int = 400,
+        session_id: str | None = None,
+        frame_index: int | None = None,
+        frame_name: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.message = message
+        self.status_code = status_code
+        self.session_id = session_id
+        self.frame_index = frame_index
+        self.frame_name = frame_name
+
+    def to_response(self) -> OfflineRunErrorResponse:
+        return OfflineRunErrorResponse(
+            error_code=self.error_code,
+            message=self.message,
+            session_id=self.session_id,
+            frame_index=self.frame_index,
+            frame_name=self.frame_name,
+        )
+
+
 @dataclass(slots=True)
 class OfflineRunSession:
     session_id: str
@@ -127,6 +194,7 @@ class OfflineRunSession:
     temperature_trace: OfflineCaptureTemperatureTrace | None = None
     end_of_stream: bool = False
     last_preview_encode_ms: float | None = None
+    trace_buffer: deque[OfflineRunTraceEntry] = field(default_factory=lambda: deque(maxlen=200))
 
 
 class OfflineRunService:
@@ -144,9 +212,16 @@ class OfflineRunService:
         if request.start_frame_index >= len(frame_paths):
             raise IndexError("offline run start frame index is outside available frames")
 
-        measurement_definition = setup_service.get_measurement_definition(
-            request.measurement_definition_id
-        ).model_copy(deep=True)
+        try:
+            measurement_definition = setup_service.get_measurement_definition(
+                request.measurement_definition_id
+            ).model_copy(deep=True)
+        except KeyError as exc:
+            raise OfflineRunRequestError(
+                error_code="measurement_definition_missing",
+                message="measurement definition is not available",
+                status_code=404,
+            ) from exc
         session_id = f"offline_run_{uuid4().hex[:12]}"
         dataset_label = _safe_dataset_label(request.dataset_label, frames_dir)
         temperature_csv = resolve_capture_temperature_csv(frames_dir)
@@ -202,16 +277,21 @@ class OfflineRunService:
     def next(self, session_id: str) -> OfflineRunFrameResponse:
         session = self._require_session(session_id)
         if session.end_of_stream:
-            return self._frame_response(
+            return self._frame_response_or_error(
                 session,
                 session.current_frame_index,
                 end_of_stream=True,
                 debug_level="basic",
+                operation="next",
             )
 
         frame_index = session.next_frame_index
-        response = self._frame_response(
-            session, frame_index, end_of_stream=False, debug_level="basic"
+        response = self._frame_response_or_error(
+            session,
+            frame_index,
+            end_of_stream=False,
+            debug_level="basic",
+            operation="next",
         )
         session.current_frame_index = frame_index
         if frame_index >= len(session.frame_paths) - 1:
@@ -236,7 +316,12 @@ class OfflineRunService:
             loop=session.loop,
         )
         session.end_of_stream = False
-        return self._frame_response(session, frame_index, end_of_stream=False)
+        return self._frame_response_or_error(
+            session,
+            frame_index,
+            end_of_stream=False,
+            operation="previous",
+        )
 
     def seek(self, session_id: str, frame_index: int) -> OfflineRunFrameResponse:
         session = self._require_session(session_id)
@@ -248,7 +333,12 @@ class OfflineRunService:
             loop=session.loop,
         )
         session.end_of_stream = False
-        return self._frame_response(session, frame_index, end_of_stream=False)
+        return self._frame_response_or_error(
+            session,
+            frame_index,
+            end_of_stream=False,
+            operation="seek",
+        )
 
     def close(self, session_id: str) -> OfflineRunCloseResponse:
         session = self._require_session(session_id)
@@ -265,34 +355,66 @@ class OfflineRunService:
         max_height: int | None = None,
     ) -> bytes:
         session = self._require_session(session_id)
-        if (
-            max_height is None
-            and max_width == session.max_preview_width
-            and frame_index in session.preview_png_cache
-        ):
-            session.preview_png_cache.move_to_end(frame_index)
-            return session.preview_png_cache[frame_index]
-        frame = self._read_frame(session, frame_index)
-        encode_start = time.perf_counter()
-        png = build_frame_preview_png(
-            frame=frame,
-            preview_url=_preview_url(
-                session.session_id,
-                frame_index,
-                max_width=max_width,
-                max_height=max_height,
-            ),
-            max_width=max_width,
-            max_height=max_height,
-            compression_level=_LIVE_PREVIEW_COMPRESSION_LEVEL,
-        ).png
-        session.last_preview_encode_ms = round((time.perf_counter() - encode_start) * 1000.0, 3)
-        if max_height is None and max_width == session.max_preview_width:
-            session.preview_png_cache[frame_index] = png
-            session.preview_png_cache.move_to_end(frame_index)
-            while len(session.preview_png_cache) > self._max_cached_frames:
-                session.preview_png_cache.popitem(last=False)
-        return png
+        api_start = time.perf_counter()
+        try:
+            if (
+                max_height is None
+                and max_width == session.max_preview_width
+                and frame_index in session.preview_png_cache
+            ):
+                session.preview_png_cache.move_to_end(frame_index)
+                return session.preview_png_cache[frame_index]
+            try:
+                frame = self._read_frame(session, frame_index)
+            except Exception as exc:
+                raise self._request_error_from_exception(
+                    exc,
+                    session=session,
+                    frame_index=frame_index,
+                    phase="read",
+                ) from exc
+            encode_start = time.perf_counter()
+            try:
+                png = build_frame_preview_png(
+                    frame=frame,
+                    preview_url=_preview_url(
+                        session.session_id,
+                        frame_index,
+                        max_width=max_width,
+                        max_height=max_height,
+                    ),
+                    max_width=max_width,
+                    max_height=max_height,
+                    compression_level=_LIVE_PREVIEW_COMPRESSION_LEVEL,
+                ).png
+            except Exception as exc:
+                raise self._request_error_from_exception(
+                    exc,
+                    session=session,
+                    frame_index=frame_index,
+                    phase="preview",
+                ) from exc
+            session.last_preview_encode_ms = round((time.perf_counter() - encode_start) * 1000.0, 3)
+            if max_height is None and max_width == session.max_preview_width:
+                session.preview_png_cache[frame_index] = png
+                session.preview_png_cache.move_to_end(frame_index)
+                while len(session.preview_png_cache) > self._max_cached_frames:
+                    session.preview_png_cache.popitem(last=False)
+            return png
+        except OfflineRunRequestError as exc:
+            self._record_error_trace(
+                session,
+                exc,
+                timings_ms={"api_total_ms": round((time.perf_counter() - api_start) * 1000.0, 3)},
+            )
+            raise
+
+    def trace(self, session_id: str) -> OfflineRunTraceResponse:
+        session = self._require_session(session_id)
+        return OfflineRunTraceResponse(
+            session_id=session.session_id,
+            traces=list(session.trace_buffer),
+        )
 
     def _frame_response(
         self,
@@ -304,7 +426,15 @@ class OfflineRunService:
     ) -> OfflineRunFrameResponse:
         api_start = time.perf_counter()
         load_start = time.perf_counter()
-        frame = self._read_frame(session, frame_index)
+        try:
+            frame = self._read_frame(session, frame_index)
+        except Exception as exc:
+            raise self._request_error_from_exception(
+                exc,
+                session=session,
+                frame_index=frame_index,
+                phase="read",
+            ) from exc
         load_ms = round((time.perf_counter() - load_start) * 1000.0, 3)
         preview_url = _preview_url(
             session.session_id,
@@ -321,16 +451,26 @@ class OfflineRunService:
             max_width=session.max_preview_width,
         )
         detect_start = time.perf_counter()
-        detection_result = self._detect_frame(session, frame, debug_level=debug_level)
+        try:
+            detection_result = self._detect_frame(session, frame, debug_level=debug_level)
+        except Exception as exc:
+            raise self._request_error_from_exception(
+                exc,
+                session=session,
+                frame_index=frame_index,
+                phase="detect",
+            ) from exc
         detect_ms = round((time.perf_counter() - detect_start) * 1000.0, 3)
         if session.previous_valid_detection is not None:
             record_previous_frame_diagnostics(
                 detection_result,
                 session.previous_valid_detection,
+                max_jump_px=_max_point_jump_px(session),
             )
         if detection_result.valid:
             session.previous_valid_detection = detection_result
         detection = _serialize_detection_result(detection_result).model_dump(mode="json")
+        detector_timings = _diagnostic_timing_payload(detection_result.diagnostics)
         runtime = {
             "run_mode": "live_offline",
             "recipe_locked": True,
@@ -346,6 +486,7 @@ class OfflineRunService:
             "detect_ms": detect_ms,
             "preview_encode_ms": session.last_preview_encode_ms,
             "api_total_ms": round((time.perf_counter() - api_start) * 1000.0, 3),
+            **detector_timings,
             **_temperature_for_frame(session, frame_index),
         }
         response = OfflineRunFrameResponse(
@@ -366,7 +507,46 @@ class OfflineRunService:
             runtime=runtime,
         )
         session.latest_detection = response.model_dump(mode="json")
+        self._record_success_trace(session, response)
         return response
+
+    def _frame_response_or_error(
+        self,
+        session: OfflineRunSession,
+        frame_index: int,
+        *,
+        end_of_stream: bool,
+        operation: str,
+        debug_level: DebugLevel = "full",
+    ) -> OfflineRunFrameResponse:
+        api_start = time.perf_counter()
+        try:
+            return self._frame_response(
+                session,
+                frame_index,
+                end_of_stream=end_of_stream,
+                debug_level=debug_level,
+            )
+        except OfflineRunRequestError as exc:
+            self._record_error_trace(
+                session,
+                exc,
+                timings_ms={"api_total_ms": round((time.perf_counter() - api_start) * 1000.0, 3)},
+            )
+            raise
+        except Exception as exc:
+            error = self._request_error_from_exception(
+                exc,
+                session=session,
+                frame_index=frame_index,
+                phase=operation,
+            )
+            self._record_error_trace(
+                session,
+                error,
+                timings_ms={"api_total_ms": round((time.perf_counter() - api_start) * 1000.0, 3)},
+            )
+            raise error from exc
 
     def _detect_frame(
         self,
@@ -428,13 +608,163 @@ class OfflineRunService:
 
     def _require_index(self, session: OfflineRunSession, frame_index: int) -> None:
         if frame_index < 0 or frame_index >= len(session.frame_paths):
-            raise IndexError("offline run frame index is outside available frames")
+            raise OfflineRunRequestError(
+                error_code="frame_index_out_of_range",
+                message="offline run frame index is outside available frames",
+                status_code=404,
+                session_id=session.session_id,
+                frame_index=frame_index,
+                frame_name=_frame_name(session, frame_index),
+            )
 
     def _require_session(self, session_id: str) -> OfflineRunSession:
         session = self._sessions.get(session_id)
         if session is None:
-            raise KeyError("offline run session is not available")
+            raise OfflineRunRequestError(
+                error_code="session_not_found",
+                message="offline run session is not available",
+                status_code=404,
+                session_id=session_id,
+            )
         return session
+
+    def _request_error_from_exception(
+        self,
+        exc: Exception,
+        *,
+        session: OfflineRunSession,
+        frame_index: int | None,
+        phase: str,
+    ) -> OfflineRunRequestError:
+        if isinstance(exc, OfflineRunRequestError):
+            if exc.session_id is not None:
+                return exc
+            return OfflineRunRequestError(
+                error_code=exc.error_code,
+                message=exc.message,
+                status_code=exc.status_code,
+                session_id=session.session_id,
+                frame_index=frame_index,
+                frame_name=_frame_name(session, frame_index),
+            )
+        if isinstance(exc, IndexError):
+            return OfflineRunRequestError(
+                error_code="frame_index_out_of_range",
+                message="offline run frame index is outside available frames",
+                status_code=404,
+                session_id=session.session_id,
+                frame_index=frame_index,
+                frame_name=_frame_name(session, frame_index),
+            )
+        if phase == "preview":
+            return OfflineRunRequestError(
+                error_code="preview_encode_failed",
+                message="offline preview could not be encoded",
+                status_code=400,
+                session_id=session.session_id,
+                frame_index=frame_index,
+                frame_name=_frame_name(session, frame_index),
+            )
+        if phase == "detect":
+            return OfflineRunRequestError(
+                error_code="detection_failed",
+                message="offline frame detection failed",
+                status_code=500,
+                session_id=session.session_id,
+                frame_index=frame_index,
+                frame_name=_frame_name(session, frame_index),
+            )
+        if isinstance(exc, ValueError) and _looks_like_unsupported_frame_format(exc):
+            return OfflineRunRequestError(
+                error_code="unsupported_frame_format",
+                message="offline frame format is not supported",
+                status_code=400,
+                session_id=session.session_id,
+                frame_index=frame_index,
+                frame_name=_frame_name(session, frame_index),
+            )
+        return OfflineRunRequestError(
+            error_code="frame_read_failed" if phase == "read" else "detection_failed",
+            message="offline frame could not be read"
+            if phase == "read"
+            else "offline run request failed",
+            status_code=400 if phase == "read" else 500,
+            session_id=session.session_id,
+            frame_index=frame_index,
+            frame_name=_frame_name(session, frame_index),
+        )
+
+    def _record_success_trace(
+        self,
+        session: OfflineRunSession,
+        response: OfflineRunFrameResponse,
+    ) -> None:
+        detection = response.detection
+        diagnostics = detection.get("diagnostics", {})
+        if not isinstance(diagnostics, dict):
+            diagnostics = {}
+        session.trace_buffer.append(
+            OfflineRunTraceEntry(
+                frame_index=response.frame_index,
+                frame_name=response.frame_name,
+                status=str(detection.get("status", "unknown")),
+                valid=bool(detection.get("valid", False)),
+                distance_px=_optional_float(detection.get("distance_px")),
+                measurement_line_y=_optional_float(diagnostics.get("measurement_line_y")),
+                formal_ab_span_px=_optional_float(diagnostics.get("formal_ab_span_px")),
+                selected_valid_intervals=_interval_summary(
+                    diagnostics.get("selected_valid_intervals")
+                ),
+                point_a=_point_payload(detection.get("point_a")),
+                point_b=_point_payload(detection.get("point_b")),
+                point_a_on_foreground_boundary=_optional_bool(
+                    diagnostics.get("point_a_on_foreground_boundary")
+                ),
+                point_b_on_foreground_boundary=_optional_bool(
+                    diagnostics.get("point_b_on_foreground_boundary")
+                ),
+                distance_jump_from_previous=_optional_float(
+                    diagnostics.get("distance_jump_from_previous")
+                ),
+                abs_distance_jump_from_previous=_optional_float(
+                    diagnostics.get("abs_distance_jump_from_previous")
+                ),
+                measurement_line_y_delta_from_previous=_optional_float(
+                    diagnostics.get("measurement_line_y_delta_from_previous")
+                    or diagnostics.get("line_y_delta_from_previous")
+                ),
+                point_a_jump_from_previous=_optional_float(
+                    diagnostics.get("point_a_jump_from_previous")
+                ),
+                point_b_jump_from_previous=_optional_float(
+                    diagnostics.get("point_b_jump_from_previous")
+                ),
+                is_top_jump_candidate=_optional_bool(diagnostics.get("is_top_jump_candidate")),
+                jump_warning=diagnostics.get("jump_warning")
+                if isinstance(diagnostics.get("jump_warning"), str)
+                else None,
+                timings_ms=_runtime_timing_payload(response.runtime),
+                error_code=None,
+            )
+        )
+
+    def _record_error_trace(
+        self,
+        session: OfflineRunSession,
+        error: OfflineRunRequestError,
+        *,
+        timings_ms: dict[str, float],
+    ) -> None:
+        session.trace_buffer.append(
+            OfflineRunTraceEntry(
+                frame_index=error.frame_index,
+                frame_name=error.frame_name,
+                status="api_error",
+                valid=False,
+                timings_ms=timings_ms,
+                error_code=error.error_code,
+            )
+        )
 
 
 def _resolve_frames_dir(frames_dir: Path | None, dataset_id: str | None = None) -> Path:
@@ -447,6 +777,98 @@ def _resolve_frames_dir(frames_dir: Path | None, dataset_id: str | None = None) 
     if not resolved.exists() or not resolved.is_dir():
         raise FileNotFoundError("offline frames directory is not available")
     return resolved
+
+
+def _frame_name(session: OfflineRunSession, frame_index: int | None) -> str | None:
+    if frame_index is None:
+        return None
+    if 0 <= frame_index < len(session.frame_paths):
+        return session.frame_paths[frame_index].name
+    return None
+
+
+def _looks_like_unsupported_frame_format(exc: ValueError) -> bool:
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "unsupported shape",
+            "unsupported offline frame format",
+            "expected a 2d grayscale frame",
+            "requires a 2d grayscale frame",
+            "preview requires a 2d grayscale frame",
+            "offline image must be p2 or p5 pgm",
+            "pgm",
+        )
+    )
+
+
+def _optional_float(value: Any) -> float | None:
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _point_payload(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        payload = {key: value[key] for key in ("x", "y", "coordinate_space") if key in value}
+        return payload or None
+    return None
+
+
+def _interval_summary(value: Any) -> list[dict[str, float | None]] | None:
+    if not isinstance(value, list):
+        return None
+    intervals: list[dict[str, float | None]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        intervals.append(
+            {
+                "start_local_x": _optional_float(item.get("start_local_x")),
+                "end_local_x": _optional_float(item.get("end_local_x")),
+                "width_px": _optional_float(item.get("width_px")),
+                "line_y": _optional_float(item.get("line_y")),
+            }
+        )
+    return intervals
+
+
+def _diagnostic_timing_payload(diagnostics: DetectionDiagnostics) -> dict[str, float]:
+    return {
+        key: value
+        for key in (
+            "segmentation_ms",
+            "connected_components_ms",
+            "wire_filtering_ms",
+            "line_scan_ms",
+            "candidate_scoring_ms",
+            "fill_holes_ms",
+            "chord_scan_ms",
+            "diagnostics_ms",
+            "detector_total_ms",
+        )
+        if isinstance((value := getattr(diagnostics, key, None)), int | float)
+    }
+
+
+def _runtime_timing_payload(runtime: dict[str, Any]) -> dict[str, float]:
+    return {
+        key: float(value)
+        for key, value in runtime.items()
+        if key.endswith("_ms") and isinstance(value, int | float)
+    }
+
+
+def _max_point_jump_px(session: OfflineRunSession) -> float | None:
+    value = getattr(session.measurement_definition.detector, "max_point_jump_px", None)
+    return float(value) if isinstance(value, int | float) else None
 
 
 def _safe_dataset_label(dataset_label: str | None, frames_dir: Path) -> str:

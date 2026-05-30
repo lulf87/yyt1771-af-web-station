@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
+  ApiRequestError,
   closeOfflineRun,
   getRunSamples,
   getRunStatus,
@@ -37,6 +38,13 @@ interface RunPageProps {
 
 type RunMode = "batch" | "live_offline";
 
+interface LiveRunErrorInfo {
+  message: string;
+  errorCode: string | null;
+  frameIndex: number | null;
+  frameName: string | null;
+}
+
 const fallbackRoi = {
   center_x: 1,
   center_y: 1,
@@ -59,6 +67,12 @@ export function RunPage({
   const [error, setError] = useState<string | null>(null);
   const [offlineRun, setOfflineRun] = useState<OfflineRunOpenResponse | null>(null);
   const [liveFrame, setLiveFrame] = useState<OfflineRunFrame | null>(null);
+  const [liveApiError, setLiveApiError] = useState<LiveRunErrorInfo | null>(null);
+  const [livePreviewError, setLivePreviewError] = useState<LiveRunErrorInfo | null>(null);
+  const [lastSuccessfulLiveFrameIndex, setLastSuccessfulLiveFrameIndex] = useState<number | null>(
+    null,
+  );
+  const [failedLiveFrameIndex, setFailedLiveFrameIndex] = useState<number | null>(null);
   const [liveFps, setLiveFps] = useState(10);
   const [liveLoop, setLiveLoop] = useState(true);
   const [isLivePlaying, setIsLivePlaying] = useState(false);
@@ -69,6 +83,7 @@ export function RunPage({
   const liveFpsRef = useRef(liveFps);
   liveFpsRef.current = liveFps;
   const lastFrameArrivalRef = useRef<number | null>(null);
+  const liveNextAbortControllerRef = useRef<AbortController | null>(null);
   const advanceLiveNextRef = useRef<
     (args: { fromPlaybackLoop: boolean }) => Promise<OfflineRunFrame | null>
   >(async () => null);
@@ -117,15 +132,26 @@ export function RunPage({
   const activeTemperatureC =
     runMode === "live_offline" ? liveTemperatureC : (latest?.temperature_c ?? null);
   const liveState =
-    error !== null && offlineRun !== null
-      ? "error"
-      : offlineRun === null
-        ? "unopened"
-        : liveFrame?.end_of_stream
-          ? "end_of_stream"
-          : isLivePlaying
-            ? "playing"
-            : "paused";
+    liveApiError !== null && offlineRun !== null
+      ? "api_error"
+      : livePreviewError !== null && offlineRun !== null
+        ? "preview_error"
+        : offlineRun === null
+          ? "unopened"
+          : liveFrame?.end_of_stream
+            ? "end_of_stream"
+            : isLivePlaying
+              ? "playing"
+              : "paused";
+  const liveControlError = liveApiError?.message ?? livePreviewError?.message ?? error;
+  const liveControlErrorKind =
+    liveApiError !== null
+      ? "API error"
+      : livePreviewError !== null
+        ? "Preview error"
+        : error !== null
+          ? "Error"
+          : null;
 
   useEffect(() => {
     liveSessionIdRef.current = offlineRun?.session_id ?? null;
@@ -133,12 +159,70 @@ export function RunPage({
 
   useEffect(() => {
     return () => {
+      liveNextAbortControllerRef.current?.abort();
       const sessionId = liveSessionIdRef.current;
       if (sessionId !== null) {
         void closeOfflineRun(sessionId);
       }
     };
   }, []);
+
+  function markLiveFrameSuccess(frame: OfflineRunFrame) {
+    setLiveFrame(frame);
+    setLiveApiError(null);
+    setLivePreviewError(null);
+    setLastSuccessfulLiveFrameIndex(frame.frame_index);
+    setFailedLiveFrameIndex(null);
+  }
+
+  function liveErrorFromCaught(caughtError: unknown, fallback: string): LiveRunErrorInfo {
+    if (caughtError instanceof ApiRequestError) {
+      return {
+        message:
+          caughtError.errorCode !== null
+            ? `${caughtError.errorCode}: ${caughtError.message}`
+            : caughtError.message,
+        errorCode: caughtError.errorCode,
+        frameIndex: caughtError.frameIndex,
+        frameName: caughtError.frameName,
+      };
+    }
+    return {
+      message: caughtError instanceof Error ? caughtError.message : fallback,
+      errorCode: null,
+      frameIndex: null,
+      frameName: null,
+    };
+  }
+
+  function recordLiveApiError(caughtError: unknown, fallback = "Request failed.") {
+    const apiError = liveErrorFromCaught(caughtError, fallback);
+    setLiveApiError(apiError);
+    setFailedLiveFrameIndex(apiError.frameIndex);
+    setIsLivePlaying(false);
+    return apiError;
+  }
+
+  function handlePreviewError(previewUrl: string) {
+    const frameIndex = liveFrame?.preview_url === previewUrl ? liveFrame.frame_index : null;
+    const frameName = liveFrame?.preview_url === previewUrl ? liveFrame.frame_name : null;
+    setIsLivePlaying(false);
+    setLivePreviewError({
+      message: `preview_fetch_failed: preview image failed to load for frame ${
+        frameIndex === null ? "unknown" : frameIndex
+      }.`,
+      errorCode: "preview_fetch_failed",
+      frameIndex,
+      frameName,
+    });
+    setFailedLiveFrameIndex(frameIndex);
+  }
+
+  function handlePreviewLoad(previewUrl: string) {
+    if (livePreviewError !== null && liveFrame?.preview_url === previewUrl) {
+      setLivePreviewError(null);
+    }
+  }
 
   async function handleStart() {
     if (measurementDefinition === null) {
@@ -190,13 +274,19 @@ export function RunPage({
       });
       setOfflineRun(opened);
       setIsLivePlaying(false);
+      setLiveApiError(null);
+      setLivePreviewError(null);
+      setLastSuccessfulLiveFrameIndex(null);
+      setFailedLiveFrameIndex(null);
       const firstFrame = await nextOfflineRun(opened.session_id);
-      setLiveFrame(firstFrame);
+      markLiveFrameSuccess(firstFrame);
     });
   }
 
   async function stopLiveOfflineSession() {
     setIsLivePlaying(false);
+    liveNextAbortControllerRef.current?.abort();
+    liveNextAbortControllerRef.current = null;
     if (liveTimer.current !== null) {
       window.clearTimeout(liveTimer.current);
       liveTimer.current = null;
@@ -211,6 +301,10 @@ export function RunPage({
     }
     setOfflineRun(null);
     setLiveFrame(null);
+    setLiveApiError(null);
+    setLivePreviewError(null);
+    setLastSuccessfulLiveFrameIndex(null);
+    setFailedLiveFrameIndex(null);
     liveSessionIdRef.current = null;
   }
 
@@ -228,7 +322,9 @@ export function RunPage({
       return;
     }
     await runAction("live-previous", async () => {
-      setLiveFrame(await previousOfflineRun(offlineRun.session_id));
+      setIsLivePlaying(false);
+      liveNextAbortControllerRef.current?.abort();
+      markLiveFrameSuccess(await previousOfflineRun(offlineRun.session_id));
     });
   }
 
@@ -242,7 +338,8 @@ export function RunPage({
     }
     await runAction("live-seek", async () => {
       setIsLivePlaying(false);
-      setLiveFrame(await seekOfflineRun(offlineRun.session_id, frameIndex));
+      liveNextAbortControllerRef.current?.abort();
+      markLiveFrameSuccess(await seekOfflineRun(offlineRun.session_id, frameIndex));
     });
   }
 
@@ -259,18 +356,25 @@ export function RunPage({
       setBusyAction("live-next");
       setError(null);
     }
+    const abortController = new AbortController();
+    liveNextAbortControllerRef.current = abortController;
     try {
-      const frame = await nextOfflineRun(offlineRun.session_id);
-      setLiveFrame(frame);
+      const frame = await nextOfflineRun(offlineRun.session_id, abortController.signal);
+      markLiveFrameSuccess(frame);
       if (frame.end_of_stream) {
         setIsLivePlaying(false);
       }
       return frame;
     } catch (caughtError) {
-      setIsLivePlaying(false);
-      setError(caughtError instanceof Error ? caughtError.message : "Request failed.");
+      if (caughtError instanceof DOMException && caughtError.name === "AbortError") {
+        return null;
+      }
+      recordLiveApiError(caughtError);
       return null;
     } finally {
+      if (liveNextAbortControllerRef.current === abortController) {
+        liveNextAbortControllerRef.current = null;
+      }
       inFlightLiveRequest.current = false;
       if (!fromPlaybackLoop) {
         setBusyAction(null);
@@ -337,7 +441,12 @@ export function RunPage({
     try {
       await task();
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Request failed.");
+      if (action.startsWith("live-") || action === "open-live" || action === "close-live") {
+        const apiError = recordLiveApiError(caughtError);
+        setError(apiError.message);
+      } else {
+        setError(caughtError instanceof Error ? caughtError.message : "Request failed.");
+      }
     } finally {
       setBusyAction(null);
     }
@@ -429,6 +538,8 @@ export function RunPage({
                   : "Start a run to show the latest frame"
               }
               frameRef={activeFrameRef}
+              onPreviewError={runMode === "live_offline" ? handlePreviewError : undefined}
+              onPreviewLoad={runMode === "live_offline" ? handlePreviewLoad : undefined}
               previewUrl={activePreviewUrl}
               roi={measurementDefinition?.roi ?? fallbackRoi}
               showDiagnosticsOverlay={runMode === "live_offline" && !isLivePlaying}
@@ -480,12 +591,15 @@ export function RunPage({
               datasetId={datasetId}
               datasets={datasets}
               distance={activeDetection?.distance_px ?? null}
-              error={error}
+              error={liveControlError}
+              errorKind={liveControlErrorKind}
+              failedFrameIndex={failedLiveFrameIndex}
               fps={liveFps}
               frameCount={frameCount}
               frameName={liveFrame?.frame_name ?? null}
               isBusy={isBusy}
               isPlaying={isLivePlaying}
+              lastSuccessfulFrameIndex={lastSuccessfulLiveFrameIndex}
               loop={liveLoop}
               maxIndex={maxLiveIndex}
               measurementDefinition={measurementDefinition}
@@ -519,7 +633,7 @@ export function RunPage({
               <StatusPanel
                 cameraStatus={liveCameraStatus}
                 detection={activeDetection}
-                error={error}
+                error={liveControlError}
                 showDebugDiagnostics={!isLivePlaying}
               />
             </section>
@@ -563,6 +677,10 @@ function LiveTimingReadout({
   const loadMs = runtimeNumber(runtime, "load_ms");
   const apiTotalMs = runtimeNumber(runtime, "api_total_ms");
   const previewEncodeMs = runtimeNumber(runtime, "preview_encode_ms");
+  const targetFps = runtimeNumber(runtime, "fps");
+  const segmentationMs = runtimeNumber(runtime, "segmentation_ms");
+  const wireFilteringMs = runtimeNumber(runtime, "wire_filtering_ms");
+  const lineScanMs = runtimeNumber(runtime, "line_scan_ms");
   const debugLevel = runtimeString(runtime, "debug_level");
   const measuredFps =
     frameIntervalMs !== null && frameIntervalMs > 0
@@ -570,8 +688,12 @@ function LiveTimingReadout({
       : null;
   const rows: Array<[string, string]> = [
     ["Measured fps", measuredFps !== null ? `${measuredFps}` : "N/A"],
+    ["Target fps", targetFps !== null ? `${targetFps}` : "N/A"],
     ["Frame interval ms", frameIntervalMs !== null ? `${frameIntervalMs}` : "N/A"],
     ["Detect ms", detectMs !== null ? `${detectMs}` : "N/A"],
+    ["Segmentation ms", segmentationMs !== null ? `${segmentationMs}` : "N/A"],
+    ["Wire filtering ms", wireFilteringMs !== null ? `${wireFilteringMs}` : "N/A"],
+    ["Line scan ms", lineScanMs !== null ? `${lineScanMs}` : "N/A"],
     ["Frame load ms", loadMs !== null ? `${loadMs}` : "N/A"],
     ["Preview encode ms", previewEncodeMs !== null ? `${previewEncodeMs}` : "N/A"],
     ["API total ms", apiTotalMs !== null ? `${apiTotalMs}` : "N/A"],
@@ -587,6 +709,11 @@ function LiveTimingReadout({
           </div>
         ))}
       </dl>
+      {detectMs !== null && detectMs > 100 ? (
+        <p className="panel-warning">
+          Detector is slower than target FPS; playback is detector-limited.
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -676,11 +803,14 @@ function LiveOfflineRunControls({
   datasets,
   distance,
   error,
+  errorKind,
+  failedFrameIndex,
   fps,
   frameCount,
   frameName,
   isBusy,
   isPlaying,
+  lastSuccessfulFrameIndex,
   loop,
   maxIndex,
   measurementDefinition,
@@ -707,11 +837,14 @@ function LiveOfflineRunControls({
   datasets: OfflineDataset[];
   distance: number | null;
   error: string | null;
+  errorKind: string | null;
+  failedFrameIndex: number | null;
   fps: number;
   frameCount: number;
   frameName: string | null;
   isBusy: boolean;
   isPlaying: boolean;
+  lastSuccessfulFrameIndex: number | null;
   loop: boolean;
   maxIndex: number;
   measurementDefinition: MeasurementDefinition | null;
@@ -829,6 +962,14 @@ function LiveOfflineRunControls({
             <dd>{hasSession ? `${currentIndex} / ${maxIndex}` : "N/A"}</dd>
           </div>
           <div>
+            <dt>Last successful frame</dt>
+            <dd>{lastSuccessfulFrameIndex === null ? "N/A" : lastSuccessfulFrameIndex}</dd>
+          </div>
+          <div>
+            <dt>Failed frame</dt>
+            <dd>{failedFrameIndex === null ? "N/A" : failedFrameIndex}</dd>
+          </div>
+          <div>
             <dt>Frame name</dt>
             <dd>{frameName ?? "N/A"}</dd>
           </div>
@@ -872,7 +1013,7 @@ function LiveOfflineRunControls({
           ) : null}
           {error ? (
             <div className="metric-error">
-              <dt>Error</dt>
+              <dt>{errorKind ?? "Error"}</dt>
               <dd>{error}</dd>
             </div>
           ) : null}

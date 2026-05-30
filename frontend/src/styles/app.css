@@ -427,6 +427,15 @@ select {
   border-bottom: 1px solid #e3e8ef;
 }
 
+.panel-warning {
+  margin: 10px 0 0;
+  border-left: 3px solid #b45309;
+  padding-left: 10px;
+  color: #6b3b0a;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .debug-diagnostics {
   display: grid;
   gap: 10px;

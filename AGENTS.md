@@ -6,6 +6,8 @@ This repository is a clean-start implementation of a YY/T 1771-style AF visual s
 
 Build a new project from these local documents only. Do not reference, inspect, copy, or import from any previous repository.
 
+Exception for validation material only: user-approved offline camera capture frames may be read from the local legacy runtime folder listed under "Local validation material". This exception is limited to raw `.npy`/`.pgm` frames and associated capture metadata needed for Live Offline Run, Offline Validation, Playback, Analysis, and Export checks. Do not inspect, copy, import, or reuse code from the legacy project.
+
 ## Read first
 
 Before making changes, read these files in order:
@@ -78,6 +80,25 @@ Use:
 - Python module entrypoints
 - cross-platform npm scripts
 
+## Local validation material
+
+The following local folders are approved read-only offline capture material for this workstation:
+
+- `/Users/lulingfeng/Documents/工作/开发/奥氏体变换/1771/yyt1771_starter/examples/runtime/camera_captures/20260522-183158-dev_lab/frames`
+  - 5807 `.npy`/`.pgm` frames
+  - capture metadata is in the parent folder, including `manifest.json` and `temperature.csv`
+- `/Users/lulingfeng/Documents/工作/开发/奥氏体变换/1771/yyt1771_starter/examples/runtime/camera_captures/20260529-194304-dev_lab/frames`
+  - 8623 `.npy`/`.pgm` frames
+  - capture metadata is in the parent folder, including `manifest.json` and `temperature.csv`
+
+Rules for this material:
+
+- Treat it as immutable raw data: do not edit, rename, move, delete, regenerate, or commit copies of these files.
+- It may be used to verify Live Offline Run stability, trace diagnostics, FPS profiling, Offline Validation, Playback, Analysis, and Export behavior.
+- Configure it through environment variables such as `YYT1771_AF_OFFLINE_DIR` or ignored local config such as `configs/local/offline_datasets.local.json`.
+- Do not hard-code these absolute paths in application code, tests, API responses, diagnostics payloads, committed cross-platform docs, or logs returned to the frontend.
+- API responses and diagnostics must expose only sanitized labels or frame basenames, never the local capture path.
+
 ## Suggested implementation stack
 
 Backend:
@@ -119,5 +140,5 @@ A task is done only when:
 - Tests are added or updated.
 - Tests and lint pass or failures are clearly explained.
 - Every fix is confirmed in a real browser when it affects the Web UI or user-facing API flow; report the browser URL, action taken, and observed result. If browser confirmation is impossible, state the blocker explicitly.
-- No old-project references are introduced.
+- No old-project references are introduced, except the approved read-only validation material listed above.
 - macOS/Windows portability rules remain satisfied.

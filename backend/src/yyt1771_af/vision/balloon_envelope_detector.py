@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import numpy as np
 
 from yyt1771_af.core.models import (
@@ -11,6 +13,7 @@ from yyt1771_af.core.models import (
 )
 from yyt1771_af.core.statuses import DetectionStatus, DetectorKind, TargetFamily
 from yyt1771_af.vision.detection_debug import DebugLevel, wants_full_diagnostics
+from yyt1771_af.vision.detector_timing import attach_detector_timings, elapsed_ms
 from yyt1771_af.vision.roi_ops import (
     ContactRejection,
     assert_ab_invariants,
@@ -45,18 +48,27 @@ class BalloonEnvelopeDetector:
         params: BalloonEnvelopeDetectorParams | None = None,
         debug_level: DebugLevel = "full",
     ) -> DetectionResult:
+        detector_start = time.perf_counter()
         params = params or BalloonEnvelopeDetectorParams()
         segmentation = segmentation or _segmentation_defaults_for_params(params)
 
         if frame.ndim != 2:
-            return self._failure(
-                DetectionStatus.SEGMENTATION_FAILED,
-                message="Frame is not grayscale.",
+            return attach_detector_timings(
+                self._failure(
+                    DetectionStatus.SEGMENTATION_FAILED,
+                    message="Frame is not grayscale.",
+                ),
+                {},
+                detector_start=detector_start,
             )
         if not roi_is_inside_frame(frame, roi):
-            return self._failure(
-                DetectionStatus.ROI_OUTSIDE_FRAME,
-                message="ROI is outside frame.",
+            return attach_detector_timings(
+                self._failure(
+                    DetectionStatus.ROI_OUTSIDE_FRAME,
+                    message="ROI is outside frame.",
+                ),
+                {},
+                detector_start=detector_start,
             )
 
         crop = extract_roi_crop(frame, roi, padding_px=morphology_padding_px(segmentation))
@@ -66,6 +78,7 @@ class BalloonEnvelopeDetector:
             segmentation=segmentation,
             params=params,
             debug_level=debug_level,
+            detector_start=detector_start,
         )
         # ``extract_roi_crop`` returned crop-local acquisition coordinates; shift
         # every acquisition-space output back to true acquisition coordinates.
@@ -80,8 +93,39 @@ class BalloonEnvelopeDetector:
         segmentation: SegmentationParams,
         params: BalloonEnvelopeDetectorParams,
         debug_level: DebugLevel,
+        detector_start: float,
     ) -> DetectionResult:
         wants_full = wants_full_diagnostics(debug_level)
+        timings_ms: dict[str, float] = {}
+
+        def _timed_failure(
+            status: DetectionStatus,
+            *,
+            quality: float = 0.0,
+            contour_area_px: float | None = None,
+            contour_point_count: int | None = None,
+            candidate_components: int | None = None,
+            message: str | None = None,
+            diagnostics_extra: dict[str, object] | None = None,
+        ) -> DetectionResult:
+            diagnostics_start = time.perf_counter()
+            result = self._failure(
+                status,
+                quality=quality,
+                contour_area_px=contour_area_px,
+                contour_point_count=contour_point_count,
+                candidate_components=candidate_components,
+                message=message,
+                diagnostics_extra=diagnostics_extra,
+            )
+            timings_ms["diagnostics_ms"] = elapsed_ms(diagnostics_start)
+            return attach_detector_timings(
+                result,
+                timings_ms,
+                detector_start=detector_start,
+            )
+
+        segmentation_start = time.perf_counter()
         roi_mask = rotated_roi_mask(frame.shape, roi)
         roi_area = max(1, int(np.count_nonzero(roi_mask)))
         segmentation_layers, contrast_quality, segmentation_debug = (
@@ -92,7 +136,10 @@ class BalloonEnvelopeDetector:
                 preferred_point_xy=(roi.center_x, roi.center_y),
             )
         )
+        timings_ms["segmentation_ms"] = elapsed_ms(segmentation_start)
+        fill_holes_start = time.perf_counter()
         filled_envelope = fill_internal_holes(segmentation_layers.morphology_foreground) & roi_mask
+        timings_ms["fill_holes_ms"] = elapsed_ms(fill_holes_start)
         contact_source_used = params.contact_source or "filled_envelope"
         foreground = _contact_source_mask(
             contact_source_used,
@@ -113,7 +160,7 @@ class BalloonEnvelopeDetector:
             actual_contact_source_area_ratio=actual_contact_source_area_ratio,
         )
         if params.envelope_mode == "open_mesh" and contact_source_used == "filled_envelope":
-            return self._failure(
+            return _timed_failure(
                 DetectionStatus.SEGMENTATION_FAILED,
                 quality=contrast_quality,
                 message="open_mesh formal A/B cannot use filled_envelope debug layer.",
@@ -125,15 +172,17 @@ class BalloonEnvelopeDetector:
                 },
             )
         if not np.any(foreground):
-            return self._failure(
+            return _timed_failure(
                 DetectionStatus.LOW_CONTRAST,
                 quality=contrast_quality,
                 diagnostics_extra=layer_diagnostics,
             )
 
+        components_start = time.perf_counter()
         components = connected_components(foreground, segmentation.min_component_area_px)
+        timings_ms["connected_components_ms"] = elapsed_ms(components_start)
         if not components:
-            return self._failure(
+            return _timed_failure(
                 DetectionStatus.TARGET_NOT_FOUND,
                 quality=contrast_quality,
                 diagnostics_extra=layer_diagnostics | {"candidate_component_count": 0},
@@ -143,7 +192,7 @@ class BalloonEnvelopeDetector:
             and len(components) > 1
             and components[1].area_px > components[0].area_px * 0.35
         ):
-            return self._failure(
+            return _timed_failure(
                 DetectionStatus.MULTIPLE_TARGETS,
                 quality=contrast_quality,
                 candidate_components=len(components),
@@ -167,6 +216,7 @@ class BalloonEnvelopeDetector:
                 mask=component_mask,
                 coordinates_yx=np.vstack(component_coordinates),
             )
+        chord_timings: dict[str, float] = {}
         selection = select_roi_local_chord_contacts_debug(
             component.mask,
             roi,
@@ -179,7 +229,10 @@ class BalloonEnvelopeDetector:
             bridged_foreground_mask=segmentation_layers.morphology_foreground,
             filled_envelope_mask=filled_envelope,
             compute_debug_intervals=wants_full,
+            timings_ms=chord_timings,
         )
+        timings_ms["chord_scan_ms"] = chord_timings.get("line_scan_ms", 0.0)
+        timings_ms["candidate_scoring_ms"] = chord_timings.get("candidate_scoring_ms", 0.0)
         component_diagnostics = (
             layer_diagnostics
             | _component_margin_diagnostics(component, roi)
@@ -192,7 +245,7 @@ class BalloonEnvelopeDetector:
             }
         )
         if isinstance(selection, ContactRejection):
-            return self._failure(
+            return _timed_failure(
                 selection.status,
                 quality=contrast_quality,
                 contour_area_px=float(component.area_px),
@@ -213,7 +266,7 @@ class BalloonEnvelopeDetector:
             foreground_mask=component.mask,
         )
         if invariant_violation is not None:
-            return self._failure(
+            return _timed_failure(
                 DetectionStatus.COORDINATE_MAPPING_ERROR,
                 quality=contrast_quality,
                 contour_area_px=float(component.area_px),
@@ -222,6 +275,7 @@ class BalloonEnvelopeDetector:
                 | {"message": f"Formal A/B invariant violation: {invariant_violation}"},
             )
 
+        diagnostics_start = time.perf_counter()
         quality = max(params.min_quality, min(0.98, 0.65 + 0.3 * contrast_quality))
         result = valid_result(
             target_family=self.target_family,
@@ -269,7 +323,12 @@ class BalloonEnvelopeDetector:
                 "candidate_line_is_debug_only": selection.candidate_line_is_debug_only,
             }
         )
-        return result
+        timings_ms["diagnostics_ms"] = elapsed_ms(diagnostics_start)
+        return attach_detector_timings(
+            result,
+            timings_ms,
+            detector_start=detector_start,
+        )
 
     def _failure(
         self,

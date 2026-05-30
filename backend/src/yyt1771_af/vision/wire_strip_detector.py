@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import numpy as np
 
 from yyt1771_af.core.models import (
@@ -11,6 +13,7 @@ from yyt1771_af.core.models import (
 )
 from yyt1771_af.core.statuses import DetectionStatus, DetectorKind, TargetFamily
 from yyt1771_af.vision.detection_debug import DebugLevel, wants_full_diagnostics
+from yyt1771_af.vision.detector_timing import attach_detector_timings, elapsed_ms
 from yyt1771_af.vision.roi_ops import (
     ContactRejection,
     assert_ab_invariants,
@@ -59,18 +62,27 @@ class WireStripDetector:
         params: WireStripDetectorParams | None = None,
         debug_level: DebugLevel = "full",
     ) -> DetectionResult:
+        detector_start = time.perf_counter()
         segmentation = segmentation or SegmentationParams()
         params = params or WireStripDetectorParams()
 
         if frame.ndim != 2:
-            return self._failure(
-                DetectionStatus.SEGMENTATION_FAILED,
-                message="Frame is not grayscale.",
+            return attach_detector_timings(
+                self._failure(
+                    DetectionStatus.SEGMENTATION_FAILED,
+                    message="Frame is not grayscale.",
+                ),
+                {},
+                detector_start=detector_start,
             )
         if not roi_is_inside_frame(frame, roi):
-            return self._failure(
-                DetectionStatus.ROI_OUTSIDE_FRAME,
-                message="ROI is outside frame.",
+            return attach_detector_timings(
+                self._failure(
+                    DetectionStatus.ROI_OUTSIDE_FRAME,
+                    message="ROI is outside frame.",
+                ),
+                {},
+                detector_start=detector_start,
             )
 
         crop = extract_roi_crop(frame, roi, padding_px=morphology_padding_px(segmentation))
@@ -80,6 +92,7 @@ class WireStripDetector:
             segmentation=segmentation,
             params=params,
             debug_level=debug_level,
+            detector_start=detector_start,
         )
         # ``extract_roi_crop`` returned crop-local acquisition coordinates; shift
         # every acquisition-space output back to true acquisition coordinates.
@@ -94,8 +107,39 @@ class WireStripDetector:
         segmentation: SegmentationParams,
         params: WireStripDetectorParams,
         debug_level: DebugLevel,
+        detector_start: float,
     ) -> DetectionResult:
         wants_full = wants_full_diagnostics(debug_level)
+        timings_ms: dict[str, float] = {}
+
+        def _timed_failure(
+            status: DetectionStatus,
+            *,
+            quality: float = 0.0,
+            contour_area_px: float | None = None,
+            contour_point_count: int | None = None,
+            candidate_components: int | None = None,
+            message: str | None = None,
+            diagnostics_extra: dict[str, object] | None = None,
+        ) -> DetectionResult:
+            diagnostics_start = time.perf_counter()
+            result = self._failure(
+                status,
+                quality=quality,
+                contour_area_px=contour_area_px,
+                contour_point_count=contour_point_count,
+                candidate_components=candidate_components,
+                message=message,
+                diagnostics_extra=diagnostics_extra,
+            )
+            timings_ms["diagnostics_ms"] = elapsed_ms(diagnostics_start)
+            return attach_detector_timings(
+                result,
+                timings_ms,
+                detector_start=detector_start,
+            )
+
+        segmentation_start = time.perf_counter()
         roi_mask = rotated_roi_mask(frame.shape, roi)
         foreground, contrast_quality, segmentation_debug = segment_target_mask_debug(
             frame,
@@ -103,21 +147,25 @@ class WireStripDetector:
             segmentation,
             preferred_point_xy=(roi.center_x, roi.center_y),
         )
+        timings_ms["segmentation_ms"] = elapsed_ms(segmentation_start)
         if not np.any(foreground):
-            return self._failure(
+            return _timed_failure(
                 DetectionStatus.LOW_CONTRAST,
                 quality=contrast_quality,
                 diagnostics_extra=_segmentation_diagnostics(segmentation_debug),
             )
 
+        components_start = time.perf_counter()
         components = connected_components(foreground, segmentation.min_component_area_px)
+        timings_ms["connected_components_ms"] = elapsed_ms(components_start)
         if not components:
-            return self._failure(
+            return _timed_failure(
                 DetectionStatus.TARGET_NOT_FOUND,
                 quality=contrast_quality,
                 diagnostics_extra=_segmentation_diagnostics(segmentation_debug)
                 | {"candidate_component_count": 0},
             )
+        wire_filtering_start = time.perf_counter()
         wire_analysis = analyze_wire_components(
             image=frame,
             roi=roi,
@@ -125,6 +173,7 @@ class WireStripDetector:
             foreground=foreground,
             components=components,
         )
+        timings_ms["wire_filtering_ms"] = elapsed_ms(wire_filtering_start)
         recipe_diagnostics = {
             "boundary_margin_px": params.boundary_margin_px,
             "roi_half_width": roi.width / 2.0,
@@ -142,7 +191,7 @@ class WireStripDetector:
         # wire intervals. The raw segmentation foreground is kept for overlays.
         wire_foreground = wire_analysis.wire_foreground
         if not np.any(wire_foreground):
-            return self._failure(
+            return _timed_failure(
                 DetectionStatus.TARGET_NOT_FOUND,
                 quality=contrast_quality,
                 candidate_components=len(components),
@@ -162,6 +211,7 @@ class WireStripDetector:
                 )
                 | {"message": "No wire-like foreground component remained after filtering."},
             )
+        selection_timings: dict[str, float] = {}
         selection = select_roi_local_chord_contacts_debug(
             wire_foreground,
             roi,
@@ -179,14 +229,20 @@ class WireStripDetector:
             reject_global_foreground_boundary=False,
             max_internal_gap_px=_WIRE_MAX_INTERNAL_GAP_RATIO * roi.width,
             compute_debug_intervals=wants_full,
+            timings_ms=selection_timings,
         )
+        timings_ms.update(selection_timings)
         selected_bbox = mask_bbox(wire_foreground)
         margins = mask_roi_margins(wire_foreground, roi)
-        component_diagnostics = _segmentation_diagnostics(segmentation_debug) | {
-            "candidate_component_count": len(components),
-            "selected_component_area_px": int(np.count_nonzero(wire_foreground)),
-            "selected_component_bbox": selected_bbox or component_bbox(components[0]),
-        } | recipe_diagnostics
+        component_diagnostics = (
+            _segmentation_diagnostics(segmentation_debug)
+            | {
+                "candidate_component_count": len(components),
+                "selected_component_area_px": int(np.count_nonzero(wire_foreground)),
+                "selected_component_bbox": selected_bbox or component_bbox(components[0]),
+            }
+            | recipe_diagnostics
+        )
         if margins is not None:
             component_diagnostics |= {
                 "left_margin_px": margins.left_margin_px,
@@ -195,7 +251,7 @@ class WireStripDetector:
                 "bottom_margin_px": margins.bottom_margin_px,
             }
         if isinstance(selection, ContactRejection):
-            return self._failure(
+            return _timed_failure(
                 selection.status,
                 quality=contrast_quality,
                 contour_area_px=float(np.count_nonzero(foreground)),
@@ -228,7 +284,7 @@ class WireStripDetector:
             foreground_mask=wire_foreground,
         )
         if invariant_violation is not None:
-            return self._failure(
+            return _timed_failure(
                 DetectionStatus.COORDINATE_MAPPING_ERROR,
                 quality=contrast_quality,
                 contour_area_px=float(np.count_nonzero(foreground)),
@@ -237,6 +293,7 @@ class WireStripDetector:
                 | {"message": f"Formal A/B invariant violation: {invariant_violation}"},
             )
 
+        diagnostics_start = time.perf_counter()
         quality = max(params.min_quality, min(0.98, 0.62 + 0.3 * contrast_quality))
         result = valid_result(
             target_family=self.target_family,
@@ -299,7 +356,12 @@ class WireStripDetector:
                 else {}
             )
         )
-        return result
+        timings_ms["diagnostics_ms"] = elapsed_ms(diagnostics_start)
+        return attach_detector_timings(
+            result,
+            timings_ms,
+            detector_start=detector_start,
+        )
 
     def _failure(
         self,

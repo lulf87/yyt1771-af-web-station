@@ -11,9 +11,11 @@ import type {
   OfflinePlaybackStatus,
   OfflineRunCloseResponse,
   OfflineRunFrame,
+  OfflineRunErrorResponse,
   OfflineRunOpenRequest,
   OfflineRunOpenResponse,
   OfflineRunStatus,
+  OfflineRunTraceResponse,
   RunListResponse,
   RunSamplesResponse,
   RunStartRequest,
@@ -30,6 +32,43 @@ import type {
   TemperatureControllerSnapshot,
   TemperatureReading,
 } from "./types";
+
+export class ApiRequestError extends Error {
+  readonly errorCode: string | null;
+  readonly status: number | null;
+  readonly sessionId: string | null;
+  readonly frameIndex: number | null;
+  readonly frameName: string | null;
+  readonly state: string | null;
+
+  constructor(
+    message: string,
+    {
+      errorCode = null,
+      status = null,
+      sessionId = null,
+      frameIndex = null,
+      frameName = null,
+      state = null,
+    }: {
+      errorCode?: string | null;
+      status?: number | null;
+      sessionId?: string | null;
+      frameIndex?: number | null;
+      frameName?: string | null;
+      state?: string | null;
+    } = {},
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.errorCode = errorCode;
+    this.status = status;
+    this.sessionId = sessionId;
+    this.frameIndex = frameIndex;
+    this.frameName = frameName;
+    this.state = state;
+  }
+}
 
 export async function openCamera(
   profile = "dev_mock",
@@ -157,9 +196,13 @@ export async function getOfflineRunStatus(sessionId: string): Promise<OfflineRun
   return requestJson<OfflineRunStatus>(`/api/offline-run/${sessionId}/status`);
 }
 
-export async function nextOfflineRun(sessionId: string): Promise<OfflineRunFrame> {
+export async function nextOfflineRun(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<OfflineRunFrame> {
   return requestJson<OfflineRunFrame>(`/api/offline-run/${sessionId}/next`, {
     method: "POST",
+    signal,
   });
 }
 
@@ -183,6 +226,10 @@ export async function closeOfflineRun(sessionId: string): Promise<OfflineRunClos
   return requestJson<OfflineRunCloseResponse>(`/api/offline-run/${sessionId}/close`, {
     method: "POST",
   });
+}
+
+export async function getOfflineRunTrace(sessionId: string): Promise<OfflineRunTraceResponse> {
+  return requestJson<OfflineRunTraceResponse>(`/api/offline-run/${sessionId}/trace`);
 }
 
 export async function listRuns(): Promise<RunListResponse> {
@@ -264,18 +311,63 @@ export async function setTemperatureOutput(
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+      ...init,
+    });
+  } catch (caughtError) {
+    if (caughtError instanceof DOMException && caughtError.name === "AbortError") {
+      throw caughtError;
+    }
+    throw new ApiRequestError(
+      caughtError instanceof Error ? caughtError.message : "Network request failed.",
+      {
+        errorCode: "network_error",
+      },
+    );
+  }
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(detail || `Request failed with status ${response.status}`);
+    const structured = parseOfflineRunError(detail);
+    if (structured !== null) {
+      throw new ApiRequestError(structured.message, {
+        errorCode: structured.error_code,
+        status: response.status,
+        sessionId: structured.session_id ?? null,
+        frameIndex: structured.frame_index ?? null,
+        frameName: structured.frame_name ?? null,
+        state: structured.state,
+      });
+    }
+    throw new ApiRequestError(detail || `Request failed with status ${response.status}`, {
+      status: response.status,
+    });
   }
   return (await response.json()) as T;
+}
+
+function parseOfflineRunError(payload: string): OfflineRunErrorResponse | null {
+  try {
+    const parsed = JSON.parse(payload) as Partial<OfflineRunErrorResponse>;
+    if (typeof parsed.error_code === "string" && typeof parsed.message === "string") {
+      return {
+        error_code: parsed.error_code,
+        message: parsed.message,
+        state: parsed.state === "error" ? "error" : "error",
+        session_id: parsed.session_id ?? null,
+        frame_index: parsed.frame_index ?? null,
+        frame_name: parsed.frame_name ?? null,
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function filenameFromDisposition(value: string | null): string | null {

@@ -7,6 +7,8 @@ from yyt1771_af.core.models import DetectionResult
 def record_previous_frame_diagnostics(
     detection: DetectionResult,
     previous: DetectionResult,
+    *,
+    max_jump_px: float | None = None,
 ) -> None:
     """Attach previous-frame jump metrics for analysis only; never changes formal A/B."""
     if not detection.valid or not previous.valid:
@@ -20,13 +22,15 @@ def record_previous_frame_diagnostics(
         detection.diagnostics.measurement_line_y is not None
         and previous.diagnostics.measurement_line_y is not None
     ):
-        detection.diagnostics.line_y_delta_from_previous = abs(
+        line_y_delta = abs(
             detection.diagnostics.measurement_line_y - previous.diagnostics.measurement_line_y
         )
+        detection.diagnostics.line_y_delta_from_previous = line_y_delta
+        detection.diagnostics.measurement_line_y_delta_from_previous = line_y_delta
     if detection.distance_px is not None and previous.distance_px is not None:
-        detection.diagnostics.distance_jump_from_previous = abs(
-            detection.distance_px - previous.distance_px
-        )
+        distance_jump = abs(detection.distance_px - previous.distance_px)
+        detection.diagnostics.distance_jump_from_previous = distance_jump
+        detection.diagnostics.abs_distance_jump_from_previous = distance_jump
     detection.diagnostics.point_a_jump_from_previous = euclidean_distance(
         previous.point_a,
         detection.point_a,
@@ -35,3 +39,19 @@ def record_previous_frame_diagnostics(
         previous.point_b,
         detection.point_b,
     )
+    jumps = [
+        value
+        for value in (
+            detection.diagnostics.distance_jump_from_previous,
+            detection.diagnostics.point_a_jump_from_previous,
+            detection.diagnostics.point_b_jump_from_previous,
+        )
+        if value is not None
+    ]
+    if max_jump_px is not None and jumps and max(jumps) > max_jump_px:
+        detection.diagnostics.is_top_jump_candidate = True
+        detection.diagnostics.jump_warning = (
+            f"Frame-to-frame jump exceeds configured threshold {max_jump_px:.2f}px."
+        )
+    elif max_jump_px is not None:
+        detection.diagnostics.is_top_jump_candidate = False

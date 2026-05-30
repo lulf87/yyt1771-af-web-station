@@ -15,6 +15,11 @@ def _write_frame(path: Path, *, x_offset: int = 0, value: int = 30) -> None:
     np.save(path, image)
 
 
+def _write_bad_color_frame(path: Path) -> None:
+    image = np.full((220, 320, 3), 230, dtype=np.uint8)
+    np.save(path, image)
+
+
 def _png_size(payload: bytes) -> tuple[int, int]:
     assert payload.startswith(b"\x89PNG\r\n\x1a\n")
     return struct.unpack(">II", payload[16:24])
@@ -408,6 +413,17 @@ def test_offline_run_next_reports_timing_and_uses_basic_debug_level(tmp_path: Pa
         assert isinstance(runtime[key], (int, float))
         assert runtime[key] >= 0.0
     assert "preview_encode_ms" in runtime
+    for key in (
+        "segmentation_ms",
+        "connected_components_ms",
+        "wire_filtering_ms",
+        "line_scan_ms",
+        "candidate_scoring_ms",
+        "diagnostics_ms",
+        "detector_total_ms",
+    ):
+        assert isinstance(runtime[key], (int, float))
+        assert runtime[key] >= 0.0
 
     # Playback uses the lightweight basic level; seek/single-frame uses full.
     assert played["runtime"]["debug_level"] == "basic"
@@ -442,3 +458,132 @@ def test_offline_run_close_makes_session_unavailable(tmp_path: Path) -> None:
     assert close.status_code == 200
     assert close.json() == {"session_id": session_id, "closed": True}
     assert next_response.status_code == 404
+    payload = next_response.json()
+    assert payload["error_code"] == "session_not_found"
+    assert payload["state"] == "error"
+    assert payload["session_id"] == session_id
+
+
+def test_offline_run_next_exception_returns_sanitized_json_error(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "private_frames"
+    frames_dir.mkdir()
+    _write_bad_color_frame(frames_dir / "frame_000001.npy")
+    client = TestClient(app, raise_server_exceptions=False)
+    measurement_definition_id = _confirm_definition(client)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+
+    response = client.post(f"/api/offline-run/{session_id}/next")
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["error_code"] in {"frame_read_failed", "unsupported_frame_format"}
+    assert payload["state"] == "error"
+    assert payload["frame_index"] == 0
+    assert payload["frame_name"] == "frame_000001.npy"
+    assert payload["session_id"] == session_id
+    assert str(frames_dir) not in json.dumps(payload)
+    assert "/Users/" not in json.dumps(payload)
+
+
+def test_offline_run_preview_exception_returns_sanitized_json_error(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "private_frames"
+    frames_dir.mkdir()
+    _write_bad_color_frame(frames_dir / "frame_000001.npy")
+    client = TestClient(app, raise_server_exceptions=False)
+    measurement_definition_id = _confirm_definition(client)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+
+    response = client.get(f"/api/offline-run/{session_id}/frame/0/preview.png?max_width=160")
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["error_code"] in {
+        "frame_read_failed",
+        "preview_encode_failed",
+        "unsupported_frame_format",
+    }
+    assert payload["state"] == "error"
+    assert payload["frame_index"] == 0
+    assert payload["frame_name"] == "frame_000001.npy"
+    assert str(frames_dir) not in json.dumps(payload)
+
+
+def test_offline_run_invalid_detection_is_not_api_error(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    _write_frame(frames_dir / "frame_000001.npy")
+    client = TestClient(app, raise_server_exceptions=False)
+    client.post("/api/camera/open", json={"profile": "dev_mock"})
+    confirm = client.post(
+        "/api/setup/confirm",
+        json={
+            "name": "invalid-live",
+            "target_family": "wire_strip",
+            "roi": {
+                "center_x": 110.0,
+                "center_y": 110.0,
+                "width": 8.0,
+                "height": 150.0,
+                "angle_deg": 90.0,
+                "coordinate_space": "acquisition",
+            },
+            "recipe_name": "wire_strip_default",
+        },
+    )
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=confirm.json()["measurement_definition_id"],
+    )
+    session_id = opened["session_id"]
+
+    response = client.post(f"/api/offline-run/{session_id}/next")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "error_code" not in payload
+    assert payload["detection"]["valid"] is False
+    assert payload["detection"]["distance_px"] is None
+
+
+def test_offline_run_trace_records_success_and_error_frames(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    _write_frame(frames_dir / "frame_000001.npy")
+    _write_bad_color_frame(frames_dir / "frame_000002.npy")
+    client = TestClient(app, raise_server_exceptions=False)
+    measurement_definition_id = _confirm_definition(client)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+
+    ok_response = client.post(f"/api/offline-run/{session_id}/next")
+    error_response = client.post(f"/api/offline-run/{session_id}/next")
+    trace_response = client.get(f"/api/offline-run/{session_id}/trace")
+
+    assert ok_response.status_code == 200
+    assert error_response.status_code == 400
+    assert trace_response.status_code == 200
+    payload = trace_response.json()
+    assert payload["session_id"] == session_id
+    traces = payload["traces"]
+    assert [item["frame_index"] for item in traces] == [0, 1]
+    assert traces[0]["valid"] is True
+    assert traces[0]["error_code"] is None
+    assert traces[1]["valid"] is False
+    assert traces[1]["error_code"] in {"frame_read_failed", "unsupported_frame_format"}
+    assert traces[1]["frame_name"] == "frame_000002.npy"
+    assert str(frames_dir) not in json.dumps(payload)

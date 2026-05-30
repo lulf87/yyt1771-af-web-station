@@ -68,5 +68,11 @@ describe("RunPage live offline mode", () => {
     expect(markup).toContain("FPS");
     expect(markup).toContain("Close");
     expect(markup).toContain("Diagnostics");
+    expect(markup).toContain("Last successful frame");
+    expect(markup).toContain("Failed frame");
+    expect(markup).toContain("Target fps");
+    expect(markup).toContain("Segmentation ms");
+    expect(markup).toContain("Wire filtering ms");
+    expect(markup).toContain("Line scan ms");
   });
 });

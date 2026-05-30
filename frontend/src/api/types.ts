@@ -404,6 +404,44 @@ export interface OfflineRunCloseResponse {
   closed: boolean;
 }
 
+export interface OfflineRunErrorResponse {
+  error_code: string;
+  message: string;
+  state: "error";
+  session_id?: string | null;
+  frame_index?: number | null;
+  frame_name?: string | null;
+}
+
+export interface OfflineRunTraceEntry {
+  frame_index: number | null;
+  frame_name: string | null;
+  status: string;
+  valid: boolean;
+  distance_px: number | null;
+  measurement_line_y: number | null;
+  formal_ab_span_px: number | null;
+  selected_valid_intervals?: Array<Record<string, number | null>> | null;
+  point_a?: Point2D | null;
+  point_b?: Point2D | null;
+  point_a_on_foreground_boundary?: boolean | null;
+  point_b_on_foreground_boundary?: boolean | null;
+  distance_jump_from_previous?: number | null;
+  abs_distance_jump_from_previous?: number | null;
+  measurement_line_y_delta_from_previous?: number | null;
+  point_a_jump_from_previous?: number | null;
+  point_b_jump_from_previous?: number | null;
+  is_top_jump_candidate?: boolean | null;
+  jump_warning?: string | null;
+  timings_ms: Record<string, number>;
+  error_code?: string | null;
+}
+
+export interface OfflineRunTraceResponse {
+  session_id: string;
+  traces: OfflineRunTraceEntry[];
+}
+
 export interface RunSummary {
   run_id: string;
   status?: string;

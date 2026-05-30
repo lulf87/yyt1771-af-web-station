@@ -22,6 +22,8 @@ interface FrameCanvasProps {
   detection: SetupDetectResponse | null;
   interactive?: boolean;
   onRoiChange?: (roi: RotatedRoi) => void;
+  onPreviewError?: (previewUrl: string) => void;
+  onPreviewLoad?: (previewUrl: string) => void;
   emptyLabel?: string;
   showDiagnosticsOverlay?: boolean;
 }
@@ -47,6 +49,8 @@ export function FrameCanvas({
   detection,
   interactive = false,
   onRoiChange,
+  onPreviewError,
+  onPreviewLoad,
   emptyLabel = "No frozen frame",
   showDiagnosticsOverlay = false,
 }: FrameCanvasProps) {
@@ -155,7 +159,13 @@ export function FrameCanvas({
       className="frame-view"
       style={{ aspectRatio: `${activeFrameRef.width} / ${activeFrameRef.height}` }}
     >
-      <img alt="Frozen acquisition frame" className="frame-image" src={previewUrl} />
+      <img
+        alt="Frozen acquisition frame"
+        className="frame-image"
+        onError={() => onPreviewError?.(previewUrl)}
+        onLoad={() => onPreviewLoad?.(previewUrl)}
+        src={previewUrl}
+      />
       <svg
         aria-label="Acquisition overlay"
         className={canEdit ? "frame-overlay editable" : "frame-overlay"}

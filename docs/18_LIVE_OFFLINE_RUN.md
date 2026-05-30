@@ -118,10 +118,112 @@ POST /api/offline-run/{session_id}/next
 POST /api/offline-run/{session_id}/previous
 POST /api/offline-run/{session_id}/seek
 POST /api/offline-run/{session_id}/close
+GET  /api/offline-run/{session_id}/trace
 GET  /api/offline-run/{session_id}/frame/{frame_index}/preview.png?max_width=1200
 ```
 
 The `preview_url` always includes the session id so multiple sessions cannot cross-read different datasets.
+
+## Error Model
+
+Live Offline Run separates detector results from transport/API failures.
+
+- Detection invalid means `/next`, `previous`, or `seek` returned HTTP 200 with
+  `detection.valid = false`. The UI shows the detection status, draws no formal
+  A/B points, and playback may continue.
+- API error means a session, frame read, detector, or preview endpoint request
+  failed. The backend returns structured JSON with `state = "error"`,
+  `error_code`, sanitized `message`, `session_id`, and, when available,
+  `frame_index` plus the frame-name basename.
+- Preview error means the frame response succeeded but the browser failed to load
+  the `preview.png` image. The UI reports this separately from detection invalid.
+- End of stream is represented by `end_of_stream = true` when `loop = false`.
+  When `loop = true`, `next` wraps to frame 0.
+
+Supported structured error codes include:
+
+```text
+session_not_found
+frame_index_out_of_range
+frame_read_failed
+unsupported_frame_format
+detection_failed
+preview_encode_failed
+measurement_definition_missing
+```
+
+Error responses and trace payloads must not expose `frames_dir`, `/Users/...`,
+`C:\Users\...`, or any other local absolute path.
+
+## Trace Buffer
+
+Each open session keeps a bounded in-memory trace buffer for the most recent
+frames. `GET /api/offline-run/{session_id}/trace` returns sanitized entries with:
+
+- frame index and frame-name basename
+- detection status, validity, distance, point A/B
+- ROI-local `measurement_line_y`
+- `formal_ab_span_px`
+- selected wire interval summary
+- whether A/B are on foreground boundaries
+- jump diagnostics from the previous valid frame
+- per-frame timings
+- `error_code` for API/preview/read errors
+
+The trace is for diagnosis only. It is not persisted as run output and it does not
+change formal A/B selection.
+
+## Performance Timings
+
+Runtime payloads expose coarse request timings and detector-stage timings:
+
+- `load_ms`
+- `detect_ms`
+- `api_total_ms`
+- `preview_encode_ms`
+- `segmentation_ms`
+- `connected_components_ms`
+- `wire_filtering_ms`
+- `line_scan_ms`
+- `candidate_scoring_ms`
+- `fill_holes_ms`
+- `chord_scan_ms`
+- `diagnostics_ms`
+- `detector_total_ms`
+
+`api_total_ms` covers the `/next` request path and does not include the browser's
+subsequent image fetch. `preview_encode_ms` comes from the `preview.png` endpoint.
+If `detect_ms` is larger than the frame interval implied by target FPS, playback
+is detector-limited and measured FPS will be lower than target FPS.
+
+## Debug Level Policy
+
+Playing uses `debug_level = basic`. Basic mode returns formal detection,
+lightweight diagnostics, vector overlay metadata, and timings. It skips full
+raw/bridged/rejected interval diagnostics and does not generate debug overlay PNGs.
+
+Pause, step, seek, and explicit debug inspection may use `debug_level = full`.
+Full debug is for inspection and should not be used as the default playback path.
+
+## Drift Diagnostics
+
+For `wire_strip`, the formal selected line remains the current frame's valid line
+with the largest `formal_ab_span_px`. Previous-frame data is diagnostics only.
+
+Live Offline Run may report:
+
+- `previous_measurement_line_y`
+- `line_y_delta_from_previous`
+- `measurement_line_y_delta_from_previous`
+- `distance_jump_from_previous`
+- `abs_distance_jump_from_previous`
+- `point_a_jump_from_previous`
+- `point_b_jump_from_previous`
+- `is_top_jump_candidate`
+- `jump_warning`
+
+These fields can explain distance or line-y drift, but they must not influence
+the current frame's formal A/B selection.
 
 ## Run Page Workflow
 

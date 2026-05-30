@@ -177,10 +177,10 @@ def parsed_frame_index(path: Path) -> int | None:
 def _load_frame(path: Path, *, mmap_mode: str | None = None) -> np.ndarray:
     if path.suffix.lower() == ".npy":
         return np.load(path, allow_pickle=False, mmap_mode=mmap_mode)
-    if mmap_mode is not None:
-        raise ValueError("mmap metadata loading is only supported for .npy frames")
     if path.suffix.lower() == ".pgm":
         return _read_pgm(path)
+    if mmap_mode is not None:
+        raise ValueError("mmap metadata loading is only supported for .npy frames")
     raise ValueError(f"unsupported offline frame format: {path.suffix}")
 
 
