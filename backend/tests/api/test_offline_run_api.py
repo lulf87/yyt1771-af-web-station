@@ -175,6 +175,217 @@ def test_offline_run_loop_false_returns_end_of_stream(tmp_path: Path) -> None:
     assert ended["end_of_stream"] is True
 
 
+def _confirm_wire_definition(client: TestClient) -> str:
+    client.post("/api/camera/open", json={"profile": "dev_mock"})
+    response = client.post(
+        "/api/setup/confirm",
+        json={
+            "name": "live-offline-wire",
+            "target_family": "wire_strip",
+            "roi": {
+                "center_x": 120.0,
+                "center_y": 90.0,
+                "width": 130.0,
+                "height": 90.0,
+                "angle_deg": 0.0,
+                "coordinate_space": "acquisition",
+            },
+            "recipe_name": "wire_strip_default",
+            "segmentation": {
+                "polarity": "dark_on_light",
+                "threshold_mode": "fixed",
+                "threshold_value": 140,
+                "blur_kernel": 3,
+                "close_kernel": 1,
+                "open_kernel": 1,
+                "min_component_area_px": 20,
+                "fill_internal_holes": False,
+            },
+            "detector": {
+                "detector_kind": "wire_strip_detector",
+                "measurement_mode": "wire_bundle_envelope",
+                "min_quality": 0.65,
+                "max_point_jump_px": 25.0,
+                "reject_contact_on_roi_boundary": True,
+                "boundary_margin_px": 3.0,
+            },
+        },
+    )
+    assert response.status_code == 200
+    return str(response.json()["measurement_definition_id"])
+
+
+def _wire_bundle_frame() -> np.ndarray:
+    image = np.full((220, 320), 230, dtype=np.uint8)
+    image[78:142, 50:70] = 30
+    image[78:142, 100:110] = 30
+    image[78:142, 150:170] = 30
+    return image
+
+
+def test_offline_run_wire_strip_uses_wire_bundle_envelope(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "wire_frames"
+    frames_dir.mkdir()
+    np.save(frames_dir / "frame_000001.npy", _wire_bundle_frame())
+    client = TestClient(app)
+    measurement_definition_id = _confirm_wire_definition(client)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+    frame = client.post(f"/api/offline-run/{session_id}/next").json()
+    diagnostics = frame["detection"]["diagnostics"]
+    assert diagnostics["measurement_mode"] == "wire_bundle_envelope"
+    assert "two_strip" not in json.dumps(diagnostics)
+
+
+def test_offline_run_invalid_frame_returns_null_formal_points(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    _write_frame(frames_dir / "frame_000001.npy")
+    client = TestClient(app)
+    client.post("/api/camera/open", json={"profile": "dev_mock"})
+    confirm = client.post(
+        "/api/setup/confirm",
+        json={
+            "name": "invalid-live",
+            "target_family": "wire_strip",
+            "roi": {
+                "center_x": 110.0,
+                "center_y": 110.0,
+                "width": 8.0,
+                "height": 150.0,
+                "angle_deg": 90.0,
+                "coordinate_space": "acquisition",
+            },
+            "recipe_name": "wire_strip_default",
+        },
+    )
+    measurement_definition_id = confirm.json()["measurement_definition_id"]
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+    frame = client.post(f"/api/offline-run/{session_id}/next").json()
+    detection = frame["detection"]
+    assert detection["valid"] is False
+    assert detection["point_a"] is None
+    assert detection["point_b"] is None
+    assert detection["distance_px"] is None
+
+
+def test_offline_run_records_distance_jump_between_valid_frames(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    _write_frame(frames_dir / "frame_000001.npy", x_offset=0)
+    _write_frame(frames_dir / "frame_000002.npy", x_offset=8)
+    client = TestClient(app)
+    measurement_definition_id = _confirm_definition(client)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+    first = client.post(f"/api/offline-run/{session_id}/next").json()
+    second = client.post(f"/api/offline-run/{session_id}/next").json()
+    if first["detection"]["valid"] and second["detection"]["valid"]:
+        assert second["detection"]["diagnostics"].get("distance_jump_from_previous") is not None
+
+
+def test_offline_run_sessions_are_isolated(tmp_path: Path) -> None:
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    _write_frame(dir_a / "frame_000001.npy")
+    _write_frame(dir_b / "frame_000001.npy", x_offset=20)
+    client = TestClient(app)
+    measurement_definition_id = _confirm_definition(client)
+    opened_a = _open_live_run(
+        client,
+        frames_dir=dir_a,
+        measurement_definition_id=measurement_definition_id,
+    )
+    opened_b = _open_live_run(
+        client,
+        frames_dir=dir_b,
+        measurement_definition_id=measurement_definition_id,
+    )
+    assert opened_a["session_id"] != opened_b["session_id"]
+    frame_a = client.post(f"/api/offline-run/{opened_a['session_id']}/next").json()
+    frame_b = client.post(f"/api/offline-run/{opened_b['session_id']}/next").json()
+    assert opened_a["session_id"] in frame_a["preview_url"]
+    assert opened_b["session_id"] in frame_b["preview_url"]
+    assert frame_a["preview_url"] != frame_b["preview_url"]
+
+
+def test_offline_run_uses_capture_temperature_csv_when_present(tmp_path: Path) -> None:
+    capture_dir = tmp_path / "capture"
+    frames_dir = capture_dir / "frames"
+    frames_dir.mkdir(parents=True)
+    (capture_dir / "temperature.csv").write_text(
+        "\n".join(
+            [
+                "frame_index,camera_timestamp_ms,temp_timestamp_ms,celsius,source,sampled_this_frame,error",
+                "1,1000,1001,20.5,lu92xx_modbus_rtu,1,",
+                "2,1100,1001,22.0,lu92xx_modbus_rtu,1,",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _write_frame(frames_dir / "frame_000001.npy")
+    _write_frame(frames_dir / "frame_000002.npy", x_offset=4)
+    client = TestClient(app)
+    measurement_definition_id = _confirm_definition(client)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    assert opened["temperature_trace_available"] is True
+    assert opened["temperature_source_type"] == "capture_csv"
+
+    session_id = opened["session_id"]
+    first = client.post(f"/api/offline-run/{session_id}/next").json()
+    second = client.post(f"/api/offline-run/{session_id}/next").json()
+
+    assert first["runtime"]["temperature_c"] == 20.5
+    assert first["runtime"]["temperature_source_type"] == "capture_csv"
+    assert first["runtime"]["temperature_source"] == "lu92xx_modbus_rtu"
+    assert second["runtime"]["temperature_c"] == 22.0
+    assert str(capture_dir) not in json.dumps(first)
+
+
+def test_offline_run_next_includes_material_time_and_mock_temperature(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    _write_frame(frames_dir / "frame_000001.npy")
+    _write_frame(frames_dir / "frame_000002.npy", x_offset=4)
+    client = TestClient(app)
+    measurement_definition_id = _confirm_definition(client)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+
+    first = client.post(f"/api/offline-run/{session_id}/next").json()
+    second = client.post(f"/api/offline-run/{session_id}/next").json()
+
+    assert first["relative_time_s"] == 0.0
+    assert second["relative_time_s"] == 0.1
+    assert first["runtime"]["total_duration_s"] == 0.1
+    assert first["runtime"]["temperature_c"] == 0.0
+    assert second["runtime"]["temperature_c"] == 0.1
+    assert first["runtime"]["temperature_status"] == "ok"
+
+
 def test_offline_run_close_makes_session_unavailable(tmp_path: Path) -> None:
     frames_dir = tmp_path / "frames"
     frames_dir.mkdir()

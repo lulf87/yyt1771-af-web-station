@@ -21,13 +21,25 @@ from yyt1771_af.core.models import (
 )
 from yyt1771_af.core.path_redaction import safe_path_label, sanitize_path_metadata
 from yyt1771_af.core.statuses import CoordinateSpace, DetectionStatus
+from yyt1771_af.services.detection_diagnostics import record_previous_frame_diagnostics
 from yyt1771_af.services.frame_preview_service import (
     build_frame_preview_metadata,
     build_frame_preview_png,
 )
+from yyt1771_af.services.offline_capture_temperature import (
+    OfflineCaptureTemperatureTrace,
+    resolve_capture_temperature_csv,
+)
 from yyt1771_af.services.offline_datasets import resolve_offline_dataset_dir
 from yyt1771_af.services.setup_service import _serialize_detection_result, setup_service
+from yyt1771_af.services.temperature_service import temperature_service
 from yyt1771_af.vision.detection import detect_target
+
+# Live Offline Run trades a slightly larger PNG for much cheaper CPU per frame.
+# zlib level 1 encodes a 960px preview in ~13 ms instead of ~115 ms at level 9,
+# which is essential for keeping playback near the target frame rate. Reports and
+# debug overlays keep the default (level 9) compression elsewhere.
+_LIVE_PREVIEW_COMPRESSION_LEVEL = 1
 
 
 class OfflineRunOpenRequest(BaseModel):
@@ -54,6 +66,8 @@ class OfflineRunOpenResponse(BaseModel):
     fps: float
     loop: bool
     measurement_definition_id: str
+    temperature_trace_available: bool = False
+    temperature_source_type: str | None = None
 
 
 class OfflineRunStatusResponse(BaseModel):
@@ -106,7 +120,10 @@ class OfflineRunSession:
     max_preview_width: int
     created_at_ms: int
     latest_frame_cache: OrderedDict[int, Frame] = field(default_factory=OrderedDict)
+    preview_png_cache: OrderedDict[int, bytes] = field(default_factory=OrderedDict)
     latest_detection: dict[str, Any] | None = None
+    previous_valid_detection: DetectionResult | None = None
+    temperature_trace: OfflineCaptureTemperatureTrace | None = None
     end_of_stream: bool = False
 
 
@@ -130,6 +147,12 @@ class OfflineRunService:
         ).model_copy(deep=True)
         session_id = f"offline_run_{uuid4().hex[:12]}"
         dataset_label = _safe_dataset_label(request.dataset_label, frames_dir)
+        temperature_csv = resolve_capture_temperature_csv(frames_dir)
+        temperature_trace = (
+            OfflineCaptureTemperatureTrace.load(temperature_csv)
+            if temperature_csv is not None
+            else None
+        )
         session = OfflineRunSession(
             session_id=session_id,
             source=source,
@@ -142,6 +165,7 @@ class OfflineRunService:
             measurement_definition=measurement_definition,
             max_preview_width=request.max_preview_width,
             created_at_ms=time.time_ns() // 1_000_000,
+            temperature_trace=temperature_trace,
         )
         self._sessions[session_id] = session
         return OfflineRunOpenResponse(
@@ -153,6 +177,8 @@ class OfflineRunService:
             fps=request.fps,
             loop=request.loop,
             measurement_definition_id=measurement_definition.measurement_definition_id,
+            temperature_trace_available=temperature_trace is not None,
+            temperature_source_type="capture_csv" if temperature_trace is not None else None,
         )
 
     def status(self, session_id: str) -> OfflineRunStatusResponse:
@@ -234,8 +260,15 @@ class OfflineRunService:
         max_height: int | None = None,
     ) -> bytes:
         session = self._require_session(session_id)
+        if (
+            max_height is None
+            and max_width == session.max_preview_width
+            and frame_index in session.preview_png_cache
+        ):
+            session.preview_png_cache.move_to_end(frame_index)
+            return session.preview_png_cache[frame_index]
         frame = self._read_frame(session, frame_index)
-        return build_frame_preview_png(
+        png = build_frame_preview_png(
             frame=frame,
             preview_url=_preview_url(
                 session.session_id,
@@ -245,7 +278,14 @@ class OfflineRunService:
             ),
             max_width=max_width,
             max_height=max_height,
+            compression_level=_LIVE_PREVIEW_COMPRESSION_LEVEL,
         ).png
+        if max_height is None and max_width == session.max_preview_width:
+            session.preview_png_cache[frame_index] = png
+            session.preview_png_cache.move_to_end(frame_index)
+            while len(session.preview_png_cache) > self._max_cached_frames:
+                session.preview_png_cache.popitem(last=False)
+        return png
 
     def _frame_response(
         self,
@@ -269,7 +309,15 @@ class OfflineRunService:
             preview_url=preview_url,
             max_width=session.max_preview_width,
         )
-        detection = self._detect_frame(session, frame)
+        detection_result = self._detect_frame(session, frame)
+        if session.previous_valid_detection is not None:
+            record_previous_frame_diagnostics(
+                detection_result,
+                session.previous_valid_detection,
+            )
+        if detection_result.valid:
+            session.previous_valid_detection = detection_result
+        detection = _serialize_detection_result(detection_result).model_dump(mode="json")
         runtime = {
             "run_mode": "live_offline",
             "recipe_locked": True,
@@ -279,6 +327,8 @@ class OfflineRunService:
             "frame_index": frame_index,
             "frame_name": frame.frame_name,
             "relative_time_s": _relative_time_s(session, frame_index),
+            "total_duration_s": _total_duration_s(session),
+            **_temperature_for_frame(session, frame_index),
         }
         response = OfflineRunFrameResponse(
             session_id=session.session_id,
@@ -304,7 +354,7 @@ class OfflineRunService:
         self,
         session: OfflineRunSession,
         frame: Frame,
-    ) -> dict[str, Any]:
+    ) -> DetectionResult:
         measurement_definition = session.measurement_definition
         frame_ref = FrameRef(
             frame_id=frame.frame_id,
@@ -340,7 +390,7 @@ class OfflineRunService:
                 params=measurement_definition.detector,
             )
             result.frame_ref = frame_ref
-        return _serialize_detection_result(result).model_dump(mode="json")
+        return result
 
     def _read_frame(self, session: OfflineRunSession, frame_index: int) -> Frame:
         self._require_index(session, frame_index)
@@ -395,6 +445,40 @@ def _next_index_after(frame_index: int, *, frame_count: int, loop: bool) -> int:
 
 def _relative_time_s(session: OfflineRunSession, frame_index: int) -> float:
     return round(frame_index / session.fps, 6)
+
+
+def _total_duration_s(session: OfflineRunSession) -> float:
+    if not session.frame_paths:
+        return 0.0
+    max_index = max(0, len(session.frame_paths) - 1)
+    return round(max_index / session.fps, 6)
+
+
+def _temperature_for_frame(session: OfflineRunSession, frame_index: int) -> dict[str, Any]:
+    if session.temperature_trace is not None:
+        return session.temperature_trace.runtime_payload(frame_index)
+    return _temperature_for_relative_time(_relative_time_s(session, frame_index))
+
+
+def _temperature_for_relative_time(relative_time_s: float) -> dict[str, Any]:
+    metadata = temperature_service.metadata()
+    source_type = str(metadata.get("source_type", "none"))
+    if source_type == "mock":
+        start_c = float(metadata.get("start_c", 0.0))
+        end_c = float(metadata.get("end_c", 60.0))
+        rate_c_per_s = float(metadata.get("rate_c_per_s", 1.0))
+        temperature_c = round(min(end_c, start_c + relative_time_s * rate_c_per_s), 2)
+        return {
+            "temperature_c": temperature_c,
+            "temperature_status": "ok",
+            "temperature_source_type": source_type,
+        }
+    reading = temperature_service.read_current_temperature()
+    return {
+        "temperature_c": reading.temperature_c,
+        "temperature_status": reading.status.value,
+        "temperature_source_type": source_type,
+    }
 
 
 def _preview_url(

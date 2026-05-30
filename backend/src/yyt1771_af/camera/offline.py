@@ -121,9 +121,10 @@ class OfflineFolderCameraSource:
         advance_counter: bool,
         frame_id: int | None = None,
     ) -> Frame:
-        image = _load_frame(path)
+        image = _load_frame(path, mmap_mode="r")
         _require_grayscale(image, path)
-        image = np.clip(np.asarray(image), 0, 255).astype(np.uint8, copy=False)
+        if image.dtype != np.uint8:
+            image = np.clip(np.asarray(image), 0, 255).astype(np.uint8, copy=False)
         if frame_id is not None:
             resolved_frame_id = frame_id
         elif advance_counter:

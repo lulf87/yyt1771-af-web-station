@@ -26,6 +26,7 @@ import { OfflineDatasetSelector } from "../components/OfflineDatasetSelector";
 import { StatusPanel } from "../components/StatusPanel";
 import { TemperaturePanel } from "../components/TemperaturePanel";
 import { latestSample, sampleRows } from "../run/sampleDisplay";
+import { formatPlaybackTime, runtimeNumber, runtimeString } from "../run/liveOfflineDisplay";
 
 interface RunPageProps {
   datasets: OfflineDataset[];
@@ -63,6 +64,16 @@ export function RunPage({
   const [isLivePlaying, setIsLivePlaying] = useState(false);
   const inFlightLiveRequest = useRef(false);
   const liveTimer = useRef<number | null>(null);
+  const liveSessionIdRef = useRef<string | null>(null);
+  const liveFpsRef = useRef(liveFps);
+  liveFpsRef.current = liveFps;
+  const advanceLiveNextRef = useRef<
+    (args: { fromPlaybackLoop: boolean }) => Promise<OfflineRunFrame | null>
+  >(async () => null);
+
+  const frameCount = offlineRun?.frame_count ?? 0;
+  const maxLiveIndex = Math.max(0, frameCount - 1);
+  const currentLiveIndex = liveFrame?.frame_index ?? offlineRun?.current_frame_index ?? 0;
 
   const latest = latestSample(samples);
   const latestFrameRef = latest?.detection.frame_ref ?? null;
@@ -82,48 +93,50 @@ export function RunPage({
     1,
     ...chartSamples.map((sample) => sample.detection.distance_px ?? 0),
   );
+  const liveRelativeTimeS =
+    runMode === "live_offline" ? (liveFrame?.relative_time_s ?? null) : null;
+  const liveTotalDurationS =
+    runMode === "live_offline" && offlineRun !== null && frameCount > 0
+      ? runtimeNumber(liveFrame?.runtime, "total_duration_s") ??
+        maxLiveIndex / Math.max(1, liveFps)
+      : null;
+  const liveTemperatureC =
+    runMode === "live_offline"
+      ? runtimeNumber(liveFrame?.runtime, "temperature_c")
+      : null;
+  const liveTemperatureStatus =
+    runMode === "live_offline"
+      ? runtimeString(liveFrame?.runtime, "temperature_status")
+      : null;
+  const liveTemperatureSource =
+    runMode === "live_offline"
+      ? runtimeString(liveFrame?.runtime, "temperature_source")
+      : null;
+  const activeTemperatureC =
+    runMode === "live_offline" ? liveTemperatureC : (latest?.temperature_c ?? null);
   const liveState =
-    offlineRun === null
-      ? "unopened"
-      : liveFrame?.end_of_stream
-        ? "end_of_stream"
-        : isLivePlaying
-          ? "playing"
-          : "paused";
+    error !== null && offlineRun !== null
+      ? "error"
+      : offlineRun === null
+        ? "unopened"
+        : liveFrame?.end_of_stream
+          ? "end_of_stream"
+          : isLivePlaying
+            ? "playing"
+            : "paused";
 
   useEffect(() => {
-    if (!isLivePlaying || offlineRun === null) {
-      return undefined;
-    }
+    liveSessionIdRef.current = offlineRun?.session_id ?? null;
+  }, [offlineRun?.session_id]);
 
-    let cancelled = false;
-    const schedule = (delayMs: number) => {
-      liveTimer.current = window.setTimeout(() => {
-        void tick();
-      }, delayMs);
-    };
-    const tick = async () => {
-      if (cancelled) {
-        return;
-      }
-      const startedAt = Date.now();
-      const frame = await advanceLiveNext({ fromPlaybackLoop: true });
-      if (cancelled || frame?.end_of_stream) {
-        return;
-      }
-      const elapsedMs = Date.now() - startedAt;
-      schedule(Math.max(20, 1000 / Math.max(1, liveFps) - elapsedMs));
-    };
-
-    schedule(0);
+  useEffect(() => {
     return () => {
-      cancelled = true;
-      if (liveTimer.current !== null) {
-        window.clearTimeout(liveTimer.current);
-        liveTimer.current = null;
+      const sessionId = liveSessionIdRef.current;
+      if (sessionId !== null) {
+        void closeOfflineRun(sessionId);
       }
     };
-  }, [isLivePlaying, offlineRun?.session_id, liveFps]);
+  }, []);
 
   async function handleStart() {
     if (measurementDefinition === null) {
@@ -171,7 +184,7 @@ export function RunPage({
         loop: liveLoop,
         dataset_label: null,
         start_frame_index: 0,
-        max_preview_width: 1200,
+        max_preview_width: 960,
       });
       setOfflineRun(opened);
       setIsLivePlaying(false);
@@ -180,15 +193,31 @@ export function RunPage({
     });
   }
 
+  async function stopLiveOfflineSession() {
+    setIsLivePlaying(false);
+    if (liveTimer.current !== null) {
+      window.clearTimeout(liveTimer.current);
+      liveTimer.current = null;
+    }
+    if (offlineRun === null) {
+      return;
+    }
+    try {
+      await closeOfflineRun(offlineRun.session_id);
+    } catch {
+      // Session may already be closed during unmount.
+    }
+    setOfflineRun(null);
+    setLiveFrame(null);
+    liveSessionIdRef.current = null;
+  }
+
   async function handleCloseLive() {
     if (offlineRun === null) {
       return;
     }
     await runAction("close-live", async () => {
-      setIsLivePlaying(false);
-      await closeOfflineRun(offlineRun.session_id);
-      setOfflineRun(null);
-      setLiveFrame(null);
+      await stopLiveOfflineSession();
     });
   }
 
@@ -247,6 +276,48 @@ export function RunPage({
     }
   }
 
+  advanceLiveNextRef.current = advanceLiveNext;
+
+  useEffect(() => {
+    if (!isLivePlaying || offlineRun === null) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let wakeTimer: number | null = null;
+
+    const sleep = (delayMs: number) =>
+      new Promise<void>((resolve) => {
+        wakeTimer = window.setTimeout(resolve, delayMs);
+      });
+
+    void (async () => {
+      while (!cancelled) {
+        const startedAt = performance.now();
+        const frame = await advanceLiveNextRef.current({ fromPlaybackLoop: true });
+        if (cancelled || frame?.end_of_stream) {
+          break;
+        }
+        if (frame === null) {
+          await sleep(10);
+          continue;
+        }
+        const elapsedMs = performance.now() - startedAt;
+        const waitMs = Math.max(0, 1000 / Math.max(1, liveFpsRef.current) - elapsedMs);
+        if (waitMs > 0) {
+          await sleep(waitMs);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (wakeTimer !== null) {
+        window.clearTimeout(wakeTimer);
+      }
+    };
+  }, [isLivePlaying, offlineRun?.session_id, liveFps]);
+
   async function runAction(action: string, task: () => Promise<void>) {
     setBusyAction(action);
     setError(null);
@@ -260,9 +331,6 @@ export function RunPage({
   }
 
   const isBusy = busyAction !== null;
-  const frameCount = offlineRun?.frame_count ?? 0;
-  const maxLiveIndex = Math.max(0, frameCount - 1);
-  const currentLiveIndex = liveFrame?.frame_index ?? offlineRun?.current_frame_index ?? 0;
 
   return (
     <main className="app-shell">
@@ -295,12 +363,33 @@ export function RunPage({
               <span>Quality</span>
               <strong>{activeDetection ? activeDetection.quality.toFixed(2) : "-"}</strong>
             </div>
-            <div className="summary-tile">
-              <span>Temperature</span>
-              <strong>
-                {latest?.temperature_c === null || !latest ? "-" : latest.temperature_c.toFixed(1)}
-              </strong>
-            </div>
+            {runMode === "live_offline" ? (
+              <div className="summary-tile">
+                <span>Material time</span>
+                <strong>
+                  {liveRelativeTimeS === null || liveTotalDurationS === null
+                    ? "-"
+                    : `${formatPlaybackTime(liveRelativeTimeS)} / ${formatPlaybackTime(liveTotalDurationS)}`}
+                </strong>
+              </div>
+            ) : (
+              <div className="summary-tile">
+                <span>Temperature</span>
+                <strong>
+                  {activeTemperatureC === null ? "-" : activeTemperatureC.toFixed(1)}
+                </strong>
+              </div>
+            )}
+            {runMode === "live_offline" ? (
+              <div className="summary-tile">
+                <span>Temperature</span>
+                <strong>
+                  {activeTemperatureC === null
+                    ? "-"
+                    : `${activeTemperatureC.toFixed(1)}°C${liveTemperatureStatus ? ` (${liveTemperatureStatus})` : ""}${liveTemperatureSource ? ` · ${liveTemperatureSource}` : ""}`}
+                </strong>
+              </div>
+            ) : null}
 
             <div className="run-chart" aria-label="Recent distance samples">
               {chartSamples.map((sample) => {
@@ -329,6 +418,7 @@ export function RunPage({
               frameRef={activeFrameRef}
               previewUrl={activePreviewUrl}
               roi={measurementDefinition?.roi ?? fallbackRoi}
+              showDiagnosticsOverlay={runMode === "live_offline" && !isLivePlaying}
             />
           </section>
         </section>
@@ -343,8 +433,8 @@ export function RunPage({
                 aria-pressed={runMode === "batch"}
                 className={runMode === "batch" ? "segment active" : "segment"}
                 onClick={() => {
+                  void stopLiveOfflineSession();
                   setRunMode("batch");
-                  setIsLivePlaying(false);
                 }}
                 type="button"
               >
@@ -380,6 +470,7 @@ export function RunPage({
               error={error}
               fps={liveFps}
               frameCount={frameCount}
+              frameName={liveFrame?.frame_name ?? null}
               isBusy={isBusy}
               isPlaying={isLivePlaying}
               loop={liveLoop}
@@ -395,8 +486,13 @@ export function RunPage({
               onPrevious={handleLivePrevious}
               onSeek={handleLiveSeek}
               quality={activeDetection?.quality ?? null}
+              relativeTimeS={liveRelativeTimeS}
               state={liveState}
               status={activeDetection?.status ?? "waiting"}
+              temperatureC={liveTemperatureC}
+              temperatureSource={liveTemperatureSource}
+              temperatureStatus={liveTemperatureStatus}
+              totalDurationS={liveTotalDurationS}
             />
           )}
 
@@ -407,6 +503,7 @@ export function RunPage({
                 cameraStatus={liveCameraStatus}
                 detection={activeDetection}
                 error={error}
+                showDebugDiagnostics={!isLivePlaying}
               />
             </section>
           ) : null}
@@ -525,6 +622,7 @@ function LiveOfflineRunControls({
   error,
   fps,
   frameCount,
+  frameName,
   isBusy,
   isPlaying,
   loop,
@@ -540,8 +638,13 @@ function LiveOfflineRunControls({
   onPrevious,
   onSeek,
   quality,
+  relativeTimeS,
   state,
   status,
+  temperatureC,
+  temperatureSource,
+  temperatureStatus,
+  totalDurationS,
 }: {
   currentIndex: number;
   datasetId: string;
@@ -550,6 +653,7 @@ function LiveOfflineRunControls({
   error: string | null;
   fps: number;
   frameCount: number;
+  frameName: string | null;
   isBusy: boolean;
   isPlaying: boolean;
   loop: boolean;
@@ -565,8 +669,13 @@ function LiveOfflineRunControls({
   onPrevious: () => void;
   onSeek: (frameIndex: number) => void;
   quality: number | null;
+  relativeTimeS: number | null;
   state: string;
   status: string;
+  temperatureC: number | null;
+  temperatureSource: string | null;
+  temperatureStatus: string | null;
+  totalDurationS: number | null;
 }) {
   const hasSession = frameCount > 0;
 
@@ -576,7 +685,8 @@ function LiveOfflineRunControls({
         <h2>Live Offline Run</h2>
         <p className="panel-note">
           Pick a simulation material, or use YYT1771_AF_OFFLINE_DIR by default. The confirmed ROI
-          and recipe stay locked.
+          and recipe stay locked. Set FPS before Open Live Source; during Play, detailed diagnostics
+          overlays pause so playback can keep up with the target frame rate.
         </p>
         <OfflineDatasetSelector
           datasets={datasets}
@@ -663,6 +773,22 @@ function LiveOfflineRunControls({
             <dd>{hasSession ? `${currentIndex} / ${maxIndex}` : "N/A"}</dd>
           </div>
           <div>
+            <dt>Frame name</dt>
+            <dd>{frameName ?? "N/A"}</dd>
+          </div>
+          <div>
+            <dt>Material time</dt>
+            <dd>
+              {relativeTimeS === null || totalDurationS === null
+                ? "N/A"
+                : `${formatPlaybackTime(relativeTimeS)} / ${formatPlaybackTime(totalDurationS)}`}
+            </dd>
+          </div>
+          <div>
+            <dt>Relative time (s)</dt>
+            <dd>{relativeTimeS === null ? "N/A" : relativeTimeS.toFixed(1)}</dd>
+          </div>
+          <div>
             <dt>Status</dt>
             <dd>{status}</dd>
           </div>
@@ -673,6 +799,14 @@ function LiveOfflineRunControls({
           <div>
             <dt>Quality</dt>
             <dd>{quality === null ? "N/A" : quality.toFixed(2)}</dd>
+          </div>
+          <div>
+            <dt>Temperature</dt>
+            <dd>
+              {temperatureC === null
+                ? "N/A"
+                : `${temperatureC.toFixed(1)}°C${temperatureStatus ? ` (${temperatureStatus})` : ""}${temperatureSource ? ` · ${temperatureSource}` : ""}`}
+            </dd>
           </div>
           {state === "end_of_stream" ? (
             <div className="metric-error">

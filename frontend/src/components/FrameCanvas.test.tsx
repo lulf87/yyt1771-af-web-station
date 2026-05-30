@@ -50,6 +50,24 @@ describe("FrameCanvas", () => {
     expect(markup).toContain('cy="110"');
   });
 
+  it("draws debug measurement line when diagnostics overlay is enabled", () => {
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={{
+          ...detection,
+          diagnostics: { measurement_line_y: 0 },
+        }}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+        showDiagnosticsOverlay
+      />,
+    );
+
+    expect(markup).toContain("debug-measurement-line");
+    expect(markup).toContain("measurement-line");
+  });
+
   it("makes invalid detection visible without drawing fake A/B points", () => {
     const invalidDetection: SetupDetectResponse = {
       status: "caliper_contact_on_roi_boundary",

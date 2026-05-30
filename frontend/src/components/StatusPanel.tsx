@@ -5,9 +5,15 @@ interface StatusPanelProps {
   cameraStatus: CameraStatus | null;
   detection: SetupDetectResponse | null;
   error: string | null;
+  showDebugDiagnostics?: boolean;
 }
 
-export function StatusPanel({ cameraStatus, detection, error }: StatusPanelProps) {
+export function StatusPanel({
+  cameraStatus,
+  detection,
+  error,
+  showDebugDiagnostics = true,
+}: StatusPanelProps) {
   return (
     <>
       <dl className="metric-list">
@@ -58,7 +64,7 @@ export function StatusPanel({ cameraStatus, detection, error }: StatusPanelProps
           </div>
         ) : null}
       </dl>
-      {detection ? <DebugDiagnostics detection={detection} /> : null}
+      {detection && showDebugDiagnostics ? <DebugDiagnostics detection={detection} /> : null}
     </>
   );
 }

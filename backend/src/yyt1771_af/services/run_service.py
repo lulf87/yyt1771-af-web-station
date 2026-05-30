@@ -6,7 +6,6 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from yyt1771_af.core.geometry import euclidean_distance
 from yyt1771_af.core.models import (
     DetectionDiagnostics,
     DetectionResult,
@@ -16,6 +15,7 @@ from yyt1771_af.core.models import (
 )
 from yyt1771_af.core.statuses import DetectionStatus
 from yyt1771_af.services.camera_service import CameraService, camera_service
+from yyt1771_af.services.detection_diagnostics import record_previous_frame_diagnostics
 from yyt1771_af.services.setup_service import setup_service
 from yyt1771_af.services.temperature_service import TemperatureService, temperature_service
 from yyt1771_af.storage.run_store import RunArtifactStore, run_artifact_store
@@ -97,7 +97,7 @@ class RunService:
                     time.sleep(sleep_seconds)
             sample = self._capture_sample(run_id, sample_index, measurement_definition)
             if previous_valid_detection is not None:
-                _record_previous_frame_diagnostics(sample.detection, previous_valid_detection)
+                record_previous_frame_diagnostics(sample.detection, previous_valid_detection)
             if sample.detection.valid:
                 previous_valid_detection = sample.detection
             self._store.append_sample(sample)
@@ -193,35 +193,3 @@ run_service = RunService(
     store=run_artifact_store,
     temperature=temperature_service,
 )
-
-
-def _record_previous_frame_diagnostics(
-    detection: DetectionResult,
-    previous: DetectionResult,
-) -> None:
-    if not detection.valid or not previous.valid:
-        return
-    if detection.point_a is None or detection.point_b is None:
-        return
-    if previous.point_a is None or previous.point_b is None:
-        return
-    detection.diagnostics.previous_measurement_line_y = previous.diagnostics.measurement_line_y
-    if (
-        detection.diagnostics.measurement_line_y is not None
-        and previous.diagnostics.measurement_line_y is not None
-    ):
-        detection.diagnostics.line_y_delta_from_previous = abs(
-            detection.diagnostics.measurement_line_y - previous.diagnostics.measurement_line_y
-        )
-    if detection.distance_px is not None and previous.distance_px is not None:
-        detection.diagnostics.distance_jump_from_previous = abs(
-            detection.distance_px - previous.distance_px
-        )
-    detection.diagnostics.point_a_jump_from_previous = euclidean_distance(
-        previous.point_a,
-        detection.point_a,
-    )
-    detection.diagnostics.point_b_jump_from_previous = euclidean_distance(
-        previous.point_b,
-        detection.point_b,
-    )

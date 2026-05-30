@@ -68,6 +68,7 @@ def build_frame_preview_png(
     preview_url: str,
     max_width: int,
     max_height: int | None = None,
+    compression_level: int = 9,
 ) -> FramePreviewPng:
     preview_image = downsample_grayscale(
         frame.image,
@@ -90,7 +91,12 @@ def build_frame_preview_png(
     )
     return FramePreviewPng(
         metadata=metadata,
-        png=encode_png(width, height, grayscale_to_rgb(preview_image)),
+        png=encode_png(
+            width,
+            height,
+            grayscale_to_rgb(preview_image),
+            compression_level=compression_level,
+        ),
     )
 
 

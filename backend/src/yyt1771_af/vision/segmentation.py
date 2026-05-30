@@ -43,6 +43,10 @@ class SegmentationMaskLayers:
     morphology_foreground: np.ndarray
 
 
+def morphology_padding_px(params: SegmentationParams) -> int:
+    return max(int(params.close_kernel), int(params.open_kernel), 3) // 2 + 8
+
+
 def segment_target_mask(
     frame: np.ndarray,
     roi_mask: np.ndarray,

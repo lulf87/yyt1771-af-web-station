@@ -19,6 +19,7 @@ dist/
 build/
 .vite/
 coverage/
+.playwright-cli/
 *.tsbuildinfo
 
 # Local machine config

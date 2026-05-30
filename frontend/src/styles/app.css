@@ -233,6 +233,13 @@ select {
   stroke-width: 2;
 }
 
+.debug-measurement-line {
+  stroke: #6366f1;
+  stroke-dasharray: 6 4;
+  stroke-width: 1.5;
+  opacity: 0.85;
+}
+
 .selected-interval-segment {
   stroke: #22c55e;
   stroke-width: 4;

@@ -78,7 +78,7 @@ export function recipeDefaultsForTarget(targetFamily: TargetFamily): SetupRecipe
     segmentation: {
       polarity: "dark_on_light",
       threshold_mode: "fixed",
-      threshold_value: 160,
+      threshold_value: 100,
       blur_kernel: 3,
       close_kernel: 1,
       open_kernel: 1,

@@ -23,6 +23,7 @@ interface FrameCanvasProps {
   interactive?: boolean;
   onRoiChange?: (roi: RotatedRoi) => void;
   emptyLabel?: string;
+  showDiagnosticsOverlay?: boolean;
 }
 
 type DragState =
@@ -47,6 +48,7 @@ export function FrameCanvas({
   interactive = false,
   onRoiChange,
   emptyLabel = "No frozen frame",
+  showDiagnosticsOverlay = false,
 }: FrameCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -82,6 +84,11 @@ export function FrameCanvas({
       : null;
   const canEdit = interactive && onRoiChange !== undefined;
   const isInvalidDetection = detection !== null && !detection.valid;
+  const measurementLineY = detection?.diagnostics.measurement_line_y;
+  const debugMeasurementLine =
+    showDiagnosticsOverlay && typeof measurementLineY === "number"
+      ? measurementLineSegment(roi, measurementLineY)
+      : null;
 
   function pointerToAcquisition(event: PointerEvent<SVGSVGElement>): Point2D {
     if (svgRef.current === null) {
@@ -207,6 +214,16 @@ export function FrameCanvas({
             y2={segment.y2}
           />
         ))}
+        {debugMeasurementLine ? (
+          <line
+            className="debug-measurement-line"
+            vectorEffect="non-scaling-stroke"
+            x1={debugMeasurementLine.x1}
+            x2={debugMeasurementLine.x2}
+            y1={debugMeasurementLine.y1}
+            y2={debugMeasurementLine.y2}
+          />
+        ) : null}
         {pointA && pointB ? (
           <line
             className="measurement-line"
@@ -293,6 +310,15 @@ function diagnosticIntervalsToSegments(
     const end = localPointToAcquisition(roi, interval.end_local_x, interval.line_y);
     return [{ x1: start.x, y1: start.y, x2: end.x, y2: end.y }];
   });
+}
+
+function measurementLineSegment(
+  roi: RotatedRoi,
+  lineY: number,
+): { x1: number; y1: number; x2: number; y2: number } {
+  const start = localPointToAcquisition(roi, -roi.width / 2, lineY);
+  const end = localPointToAcquisition(roi, roi.width / 2, lineY);
+  return { x1: start.x, y1: start.y, x2: end.x, y2: end.y };
 }
 
 function localPointToAcquisition(

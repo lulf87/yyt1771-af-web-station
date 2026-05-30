@@ -13,6 +13,7 @@ from yyt1771_af.core.statuses import DetectionStatus, DetectorKind, TargetFamily
 from yyt1771_af.vision.roi_ops import (
     ContactRejection,
     component_bbox,
+    extract_roi_crop,
     failure_result,
     mask_bbox,
     mask_roi_margins,
@@ -26,6 +27,7 @@ from yyt1771_af.vision.roi_ops import (
 from yyt1771_af.vision.segmentation import (
     BinaryComponent,
     connected_components,
+    morphology_padding_px,
     segment_target_mask_debug,
 )
 from yyt1771_af.vision.wire_filtering import (
@@ -66,6 +68,10 @@ class WireStripDetector:
                 DetectionStatus.ROI_OUTSIDE_FRAME,
                 message="ROI is outside frame.",
             )
+
+        crop = extract_roi_crop(frame, roi, padding_px=morphology_padding_px(segmentation))
+        frame = crop.frame
+        roi = crop.roi
 
         roi_mask = rotated_roi_mask(frame.shape, roi)
         foreground, contrast_quality, segmentation_debug = segment_target_mask_debug(

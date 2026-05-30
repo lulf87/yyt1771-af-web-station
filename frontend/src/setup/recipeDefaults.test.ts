@@ -29,5 +29,7 @@ describe("setup recipe defaults", () => {
     expect(recipe.detector.measurement_mode).toBe("wire_bundle_envelope");
     expect(recipe.detector.require_physical_endpoints).toBe(false);
     expect(recipe.detector.skeleton_endpoint_detection).toBe(false);
+    expect(recipe.segmentation.threshold_mode).toBe("fixed");
+    expect(recipe.segmentation.threshold_value).toBe(100);
   });
 });

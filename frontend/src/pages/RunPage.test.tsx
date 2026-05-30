@@ -64,5 +64,9 @@ describe("RunPage live offline mode", () => {
     expect(markup).toContain("Step Next");
     expect(markup).toContain("Seek");
     expect(markup).toContain("Loop");
+    expect(markup).not.toContain("two_strip_outer_to_outer");
+    expect(markup).toContain("FPS");
+    expect(markup).toContain("Close");
+    expect(markup).toContain("Diagnostics");
   });
 });

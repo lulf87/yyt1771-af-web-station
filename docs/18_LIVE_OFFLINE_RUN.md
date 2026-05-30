@@ -40,7 +40,22 @@ Set the local offline frame folder:
 export YYT1771_AF_OFFLINE_DIR="/absolute/path/to/local/frames"
 ```
 
-The folder path is local-only. API responses and diagnostics must not echo absolute paths such as `/Users/...`, `C:\Users\...`, the project absolute path, or the full `frames_dir`.
+Real camera capture folders follow this layout:
+
+```text
+capture_id/
+  frames/frame_000001.npy
+  frames/frame_000002.npy
+  ...
+  temperature.csv
+  manifest.json
+```
+
+When `frames_dir` points at `capture_id/frames`, Live Offline Run automatically
+loads the sibling `temperature.csv` (one row per captured frame, keyed by
+1-based `frame_index`). Temperature values are replayed per frame during Live
+Offline Run; API responses expose `celsius` and `source` but never absolute
+paths to the CSV file.
 
 When the Run page opens a Live Offline Run without an explicit `frames_dir`, the backend uses `YYT1771_AF_OFFLINE_DIR`.
 

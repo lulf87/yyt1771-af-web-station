@@ -364,6 +364,8 @@ export interface OfflineRunOpenResponse {
   fps: number;
   loop: boolean;
   measurement_definition_id: string;
+  temperature_trace_available?: boolean;
+  temperature_source_type?: string | null;
 }
 
 export interface OfflineRunStatus {

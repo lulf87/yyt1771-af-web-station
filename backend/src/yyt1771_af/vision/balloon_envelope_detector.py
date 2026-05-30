@@ -14,6 +14,7 @@ from yyt1771_af.vision.roi_ops import (
     ContactRejection,
     component_bbox,
     component_roi_margins,
+    extract_roi_crop,
     failure_result,
     roi_is_inside_frame,
     rotated_roi_mask,
@@ -23,6 +24,7 @@ from yyt1771_af.vision.roi_ops import (
 from yyt1771_af.vision.segmentation import (
     connected_components,
     fill_internal_holes,
+    morphology_padding_px,
     segment_target_mask_layers_debug,
 )
 
@@ -52,6 +54,10 @@ class BalloonEnvelopeDetector:
                 DetectionStatus.ROI_OUTSIDE_FRAME,
                 message="ROI is outside frame.",
             )
+
+        crop = extract_roi_crop(frame, roi, padding_px=morphology_padding_px(segmentation))
+        frame = crop.frame
+        roi = crop.roi
 
         roi_mask = rotated_roi_mask(frame.shape, roi)
         roi_area = max(1, int(np.count_nonzero(roi_mask)))

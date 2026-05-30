@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -14,7 +14,79 @@ from yyt1771_af.core.models import (
     RotatedRoi,
 )
 from yyt1771_af.core.statuses import CoordinateSpace, DetectionStatus, DetectorKind, TargetFamily
-from yyt1771_af.vision.segmentation import BinaryComponent, contour_mask
+from yyt1771_af.vision.segmentation import BinaryComponent, contour_mask, morphology_padding_px
+
+
+@dataclass(frozen=True, slots=True)
+class RoiCropWindow:
+    frame: np.ndarray
+    roi: RotatedRoi
+    offset_y: int
+    offset_x: int
+
+
+def extract_roi_crop(
+    frame: np.ndarray,
+    roi: RotatedRoi,
+    *,
+    padding_px: int,
+    border_fill: int = 255,
+) -> RoiCropWindow:
+    height, width = frame.shape[:2]
+    half_w = roi.width / 2.0
+    half_h = roi.height / 2.0
+    unit_x, unit_y = roi_measurement_direction(roi.angle_deg)
+    perp_x, perp_y = -unit_y, unit_x
+    corner_x: list[float] = []
+    corner_y: list[float] = []
+    for local_x, local_y in (
+        (-half_w, -half_h),
+        (half_w, -half_h),
+        (half_w, half_h),
+        (-half_w, half_h),
+    ):
+        corner_x.append(roi.center_x + local_x * unit_x + local_y * perp_x)
+        corner_y.append(roi.center_y + local_x * unit_y + local_y * perp_y)
+    y0 = max(0, int(np.floor(min(corner_y))) - padding_px)
+    y1 = min(height, int(np.ceil(max(corner_y))) + padding_px + 1)
+    x0 = max(0, int(np.floor(min(corner_x))) - padding_px)
+    x1 = min(width, int(np.ceil(max(corner_x))) + padding_px + 1)
+    crop_area = max(0, y1 - y0) * max(0, x1 - x0)
+    frame_area = height * width
+    if frame_area < 400_000 or crop_area >= frame_area // 3:
+        return RoiCropWindow(frame=np.asarray(frame), roi=roi, offset_y=0, offset_x=0)
+
+    crop = np.asarray(frame[y0:y1, x0:x1])
+    pad = max(0, padding_px)
+    if pad == 0:
+        return RoiCropWindow(
+            frame=crop,
+            roi=roi.model_copy(
+                update={
+                    "center_x": roi.center_x - x0,
+                    "center_y": roi.center_y - y0,
+                }
+            ),
+            offset_y=y0,
+            offset_x=x0,
+        )
+    padded = np.full(
+        (crop.shape[0] + 2 * pad, crop.shape[1] + 2 * pad),
+        border_fill,
+        dtype=crop.dtype,
+    )
+    padded[pad : pad + crop.shape[0], pad : pad + crop.shape[1]] = crop
+    return RoiCropWindow(
+        frame=padded,
+        roi=roi.model_copy(
+            update={
+                "center_x": roi.center_x - x0 + pad,
+                "center_y": roi.center_y - y0 + pad,
+            }
+        ),
+        offset_y=y0 - pad,
+        offset_x=x0 - pad,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +232,11 @@ class _LineCandidate:
     selected_line_reason: str | None = None
     neighbor_line_support: int | None = None
     score: float = 0.0
+    # When True the diagnostic raw/bridged/virtual-envelope intervals are computed
+    # lazily (only if this candidate is the one selected) instead of for every
+    # scanned line. Plain line candidates leave this False to keep them ``None``,
+    # matching the original eager behaviour exactly.
+    carries_debug_intervals: bool = False
 
 
 def rotated_roi_mask(shape: tuple[int, int], roi: RotatedRoi) -> np.ndarray:
@@ -240,6 +317,25 @@ def select_roi_local_chord_contacts_debug(
         )
     global_margins = mask_roi_margins(foreground, roi)
 
+    def _attach_debug_intervals(candidate: _LineCandidate | None) -> _LineCandidate | None:
+        # Diagnostic-only intervals (raw/bridged foreground spans and the filled
+        # envelope span) do not influence candidate scoring or selection, so they
+        # are computed lazily for the single line that actually wins instead of
+        # for every scanned line. This keeps formal A/B and status identical while
+        # removing the dominant per-line debug cost during live playback.
+        if candidate is None or not candidate.carries_debug_intervals:
+            return candidate
+        return replace(
+            candidate,
+            raw_intervals=_debug_intervals(raw_foreground_mask, roi, candidate.measurement_line_y),
+            bridged_intervals=_debug_intervals(
+                bridged_foreground_mask, roi, candidate.measurement_line_y
+            ),
+            virtual_envelope_span_px=_virtual_span_px(
+                filled_envelope_mask, roi, candidate.measurement_line_y
+            ),
+        )
+
     candidates: list[_LineCandidate] = []
     rejected_boundary: list[_LineCandidate] = []
     mismatched: list[_LineCandidate] = []
@@ -259,9 +355,6 @@ def select_roi_local_chord_contacts_debug(
                 contour_point_count=contour_count,
                 boundary_margin_px=boundary_margin_px,
                 source_layer=source_layer,
-                raw_foreground_mask=raw_foreground_mask,
-                bridged_foreground_mask=bridged_foreground_mask,
-                filled_envelope_mask=filled_envelope_mask,
                 min_interval_width_px=min_mesh_interval_width_px,
                 min_interval_count=min_mesh_interval_count,
                 max_interval_width_ratio=max_mesh_interval_width_ratio,
@@ -283,6 +376,7 @@ def select_roi_local_chord_contacts_debug(
                 contour_point_count=contour_count,
             )
         if candidate is None:
+            # Debug intervals are attached lazily to the winning candidate only.
             mismatched.append(
                 _mismatch_candidate(
                     roi=roi,
@@ -291,13 +385,6 @@ def select_roi_local_chord_contacts_debug(
                     pattern_model=pattern_model,
                     measurement_mode=measurement_mode,
                     contour_point_count=contour_count,
-                    raw_intervals=_debug_intervals(raw_foreground_mask, roi, local_y),
-                    bridged_intervals=_debug_intervals(bridged_foreground_mask, roi, local_y),
-                    virtual_envelope_span_px=_virtual_span_px(
-                        filled_envelope_mask,
-                        roi,
-                        local_y,
-                    ),
                 )
             )
             continue
@@ -337,15 +424,17 @@ def select_roi_local_chord_contacts_debug(
                 return ContactRejection(
                     status=DetectionStatus.CALIPER_CONTACT_ON_ROI_BOUNDARY,
                     debug=_candidate_to_debug(
-                        _replace_rejected_side(
-                            candidate,
-                            _rejected_side(left_rejected, right_rejected),
+                        _attach_debug_intervals(
+                            _replace_rejected_side(
+                                candidate,
+                                _rejected_side(left_rejected, right_rejected),
+                            )
                         ),
                         roi,
                         boundary_margin_px,
                     ),
                 )
-        return _candidate_to_selection(candidate)
+        return _candidate_to_selection(_attach_debug_intervals(candidate))
     if rejected_boundary:
         candidate = _best_line_candidate(
             rejected_boundary,
@@ -353,7 +442,9 @@ def select_roi_local_chord_contacts_debug(
         )
         return ContactRejection(
             status=DetectionStatus.CALIPER_CONTACT_ON_ROI_BOUNDARY,
-            debug=_candidate_to_debug(candidate, roi, boundary_margin_px),
+            debug=_candidate_to_debug(
+                _attach_debug_intervals(candidate), roi, boundary_margin_px
+            ),
         )
     if mismatched:
         candidate = _best_line_candidate(
@@ -362,7 +453,9 @@ def select_roi_local_chord_contacts_debug(
         )
         return ContactRejection(
             status=DetectionStatus.OBJECT_INTERVAL_COUNT_MISMATCH,
-            debug=_candidate_to_debug(candidate, roi, boundary_margin_px),
+            debug=_candidate_to_debug(
+                _attach_debug_intervals(candidate), roi, boundary_margin_px
+            ),
         )
     return ContactRejection(
         status=DetectionStatus.PATTERN_NOT_FOUND,
@@ -895,9 +988,6 @@ def _build_mesh_outer_span_candidate(
     contour_point_count: int,
     boundary_margin_px: float,
     source_layer: str,
-    raw_foreground_mask: np.ndarray | None,
-    bridged_foreground_mask: np.ndarray | None,
-    filled_envelope_mask: np.ndarray | None,
     min_interval_width_px: float,
     min_interval_count: int,
     max_interval_width_ratio: float,
@@ -922,9 +1012,6 @@ def _build_mesh_outer_span_candidate(
         min_interval_width_px=min_interval_width_px,
         max_interval_width_ratio=max_interval_width_ratio,
     )
-    raw_intervals = _debug_intervals(raw_foreground_mask, roi, local_y)
-    bridged_intervals = _debug_intervals(bridged_foreground_mask, roi, local_y)
-    virtual_span = _virtual_span_px(filled_envelope_mask, roi, local_y)
     if len(valid_intervals) < min_interval_count and len(supported_intervals) >= min_interval_count:
         valid_intervals = supported_intervals
     if len(valid_intervals) < min_interval_count:
@@ -983,8 +1070,6 @@ def _build_mesh_outer_span_candidate(
         detected_pattern=detected_pattern,
         measurement_mode=measurement_mode,
         contour_point_count=contour_point_count,
-        raw_intervals=raw_intervals,
-        bridged_intervals=bridged_intervals,
         selected_valid_intervals=valid_intervals,
         leftmost_valid_interval=leftmost,
         rightmost_valid_interval=rightmost,
@@ -1001,11 +1086,11 @@ def _build_mesh_outer_span_candidate(
         if detected_pattern == "wire_bundle_envelope"
         else None,
         formal_ab_span_px=mesh_outer_span,
-        virtual_envelope_span_px=virtual_span,
         candidate_line_is_debug_only=False,
         selected_line_reason=selected_line_reason,
         neighbor_line_support=neighbor_support,
         score=score,
+        carries_debug_intervals=True,
     )
 
 
@@ -1017,9 +1102,6 @@ def _mismatch_candidate(
     pattern_model: str,
     measurement_mode: str | None,
     contour_point_count: int,
-    raw_intervals: list[ObjectInterval] | None = None,
-    bridged_intervals: list[ObjectInterval] | None = None,
-    virtual_envelope_span_px: float | None = None,
 ) -> _LineCandidate:
     return _candidate_from_local_span(
         roi=roi,
@@ -1031,10 +1113,8 @@ def _mismatch_candidate(
         detected_pattern=_detected_pattern(len(intervals)),
         measurement_mode=measurement_mode,
         contour_point_count=contour_point_count,
-        raw_intervals=raw_intervals,
-        bridged_intervals=bridged_intervals,
-        virtual_envelope_span_px=virtual_envelope_span_px,
         candidate_line_is_debug_only=True,
+        carries_debug_intervals=True,
     )
 
 
@@ -1070,6 +1150,7 @@ def _candidate_from_local_span(
     selected_line_reason: str | None = None,
     neighbor_line_support: int | None = None,
     score: float = 0.0,
+    carries_debug_intervals: bool = False,
 ) -> _LineCandidate:
     point_a_local = Point2D(
         x=float(point_a_x),
@@ -1120,6 +1201,7 @@ def _candidate_from_local_span(
         selected_line_reason=selected_line_reason,
         neighbor_line_support=neighbor_line_support,
         score=score,
+        carries_debug_intervals=carries_debug_intervals,
     )
 
 
@@ -1205,6 +1287,7 @@ def _replace_rejected_side(candidate: _LineCandidate, rejected_side: str | None)
         selected_line_reason=candidate.selected_line_reason,
         neighbor_line_support=candidate.neighbor_line_support,
         score=candidate.score,
+        carries_debug_intervals=candidate.carries_debug_intervals,
     )
 
 

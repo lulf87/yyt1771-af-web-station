@@ -46,7 +46,7 @@ const defaultRois: Record<TargetFamily, RotatedRoi> = {
     center_y: 110,
     width: 55,
     height: 150,
-    angle_deg: 90,
+    angle_deg: 0,
     coordinate_space: "acquisition",
   },
 };

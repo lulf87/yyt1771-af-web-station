@@ -165,17 +165,23 @@ def draw_text(
         cursor_x += 6 * scale
 
 
-def encode_png(width: int, height: int, pixels: bytearray) -> bytes:
-    raw_rows = bytearray()
+def encode_png(
+    width: int,
+    height: int,
+    pixels: bytearray,
+    *,
+    compression_level: int = 9,
+) -> bytes:
     row_length = width * 3
-    for y in range(height):
-        raw_rows.append(0)
-        start = y * row_length
-        raw_rows.extend(pixels[start : start + row_length])
+    # Vectorised scanline assembly: prepend the per-row PNG filter byte (0) to
+    # each RGB row in one numpy operation instead of a Python row loop.
+    pixel_rows = np.frombuffer(bytes(pixels), dtype=np.uint8).reshape(height, row_length)
+    raw_rows = np.zeros((height, row_length + 1), dtype=np.uint8)
+    raw_rows[:, 1:] = pixel_rows
     return (
         b"\x89PNG\r\n\x1a\n"
         + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
-        + _png_chunk(b"IDAT", zlib.compress(bytes(raw_rows), level=9))
+        + _png_chunk(b"IDAT", zlib.compress(raw_rows.tobytes(), level=compression_level))
         + _png_chunk(b"IEND", b"")
     )
 
