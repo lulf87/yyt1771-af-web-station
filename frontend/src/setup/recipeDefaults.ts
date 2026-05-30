@@ -87,8 +87,8 @@ export function recipeDefaultsForTarget(targetFamily: TargetFamily): SetupRecipe
     },
     detector: {
       detector_kind: "wire_strip_detector",
-      measurement_model: "blank_object_blank_object_blank",
-      measurement_mode: "outer_to_outer",
+      measurement_model: "blank_wire_bundle_envelope_blank",
+      measurement_mode: "wire_bundle_envelope",
       min_quality: 0.6,
       max_point_jump_px: 20,
       reject_contact_on_roi_boundary: true,

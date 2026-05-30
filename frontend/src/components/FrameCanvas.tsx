@@ -64,6 +64,18 @@ export function FrameCanvas({
   const handles = roiHandlePoints(roi);
   const pointA = detection?.point_a ? pointToOverlayCircle(detection.point_a) : null;
   const pointB = detection?.point_b ? pointToOverlayCircle(detection.point_b) : null;
+  const selectedIntervalSegments =
+    detection?.valid === true
+      ? diagnosticIntervalsToSegments(detection.diagnostics.selected_valid_intervals, roi)
+      : [];
+  const rejectedA =
+    detection !== null && !detection.valid
+      ? diagnosticPointToCircle(detection.diagnostics.rejected_candidate_point_a)
+      : null;
+  const rejectedB =
+    detection !== null && !detection.valid
+      ? diagnosticPointToCircle(detection.diagnostics.rejected_candidate_point_b)
+      : null;
   const canEdit = interactive && onRoiChange !== undefined;
   const isInvalidDetection = detection !== null && !detection.valid;
 
@@ -169,6 +181,17 @@ export function FrameCanvas({
               />
             ))
           : null}
+        {selectedIntervalSegments.map((segment, index) => (
+          <line
+            className="selected-interval-segment"
+            key={`${segment.x1}-${segment.y1}-${index}`}
+            vectorEffect="non-scaling-stroke"
+            x1={segment.x1}
+            x2={segment.x2}
+            y1={segment.y1}
+            y2={segment.y2}
+          />
+        ))}
         {pointA && pointB ? (
           <line
             className="measurement-line"
@@ -181,7 +204,94 @@ export function FrameCanvas({
         ) : null}
         {pointA ? <circle className="point point-a" r="4" {...pointA} /> : null}
         {pointB ? <circle className="point point-b" r="4" {...pointB} /> : null}
+        {pointA === null && pointB === null && rejectedA && rejectedB ? (
+          <line
+            className="rejected-debug-line"
+            vectorEffect="non-scaling-stroke"
+            x1={rejectedA.cx}
+            x2={rejectedB.cx}
+            y1={rejectedA.cy}
+            y2={rejectedB.cy}
+          />
+        ) : null}
+        {pointA === null && rejectedA ? (
+          <circle className="rejected-debug-point" r="4" {...rejectedA} />
+        ) : null}
+        {pointB === null && rejectedB ? (
+          <circle className="rejected-debug-point" r="4" {...rejectedB} />
+        ) : null}
+        {pointA === null && (rejectedA || rejectedB) ? (
+          <text
+            className="rejected-debug-label"
+            x={(rejectedA ?? rejectedB)?.cx ?? 12}
+            y={Math.max(16, ((rejectedA ?? rejectedB)?.cy ?? 28) - 10)}
+          >
+            REJECTED DEBUG
+          </text>
+        ) : null}
       </svg>
     </div>
   );
+}
+
+function diagnosticPointToCircle(value: unknown): { cx: number; cy: number } | null {
+  if (typeof value !== "object" || value === null || !("x" in value) || !("y" in value)) {
+    return null;
+  }
+  const point = value as Record<string, unknown>;
+  if (typeof point.x !== "number" || typeof point.y !== "number") {
+    return null;
+  }
+  return pointToOverlayCircle({
+    x: point.x,
+    y: point.y,
+    coordinate_space: "acquisition",
+  });
+}
+
+function diagnosticIntervalsToSegments(
+  value: unknown,
+  roi: RotatedRoi,
+): Array<{ x1: number; y1: number; x2: number; y2: number }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item) => {
+    if (
+      typeof item !== "object" ||
+      item === null ||
+      !("start_local_x" in item) ||
+      !("end_local_x" in item) ||
+      !("line_y" in item)
+    ) {
+      return [];
+    }
+    const interval = item as Record<string, unknown>;
+    if (
+      typeof interval.start_local_x !== "number" ||
+      typeof interval.end_local_x !== "number" ||
+      typeof interval.line_y !== "number"
+    ) {
+      return [];
+    }
+    const start = localPointToAcquisition(roi, interval.start_local_x, interval.line_y);
+    const end = localPointToAcquisition(roi, interval.end_local_x, interval.line_y);
+    return [{ x1: start.x, y1: start.y, x2: end.x, y2: end.y }];
+  });
+}
+
+function localPointToAcquisition(
+  roi: RotatedRoi,
+  localX: number,
+  localY: number,
+): { x: number; y: number } {
+  const angleRad = (roi.angle_deg * Math.PI) / 180;
+  const unitX = Math.cos(angleRad);
+  const unitY = Math.sin(angleRad);
+  const perpX = -unitY;
+  const perpY = unitX;
+  return {
+    x: roi.center_x + localX * unitX + localY * perpX,
+    y: roi.center_y + localX * unitY + localY * perpY,
+  };
 }

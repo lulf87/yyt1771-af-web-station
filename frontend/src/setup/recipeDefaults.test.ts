@@ -18,15 +18,15 @@ describe("setup recipe defaults", () => {
     expect(recipe.segmentation.fill_internal_holes).toBe(false);
   });
 
-  it("keeps wire strip in outer-to-outer same-line chord mode", () => {
+  it("keeps wire strip in wire bundle envelope same-line chord mode", () => {
     const recipe = recipeDefaultsForTarget("wire_strip");
 
     expect(recipe.detector.detector_kind).toBe("wire_strip_detector");
     if (recipe.detector.detector_kind !== "wire_strip_detector") {
       throw new Error("expected wire detector");
     }
-    expect(recipe.detector.measurement_model).toBe("blank_object_blank_object_blank");
-    expect(recipe.detector.measurement_mode).toBe("outer_to_outer");
+    expect(recipe.detector.measurement_model).toBe("blank_wire_bundle_envelope_blank");
+    expect(recipe.detector.measurement_mode).toBe("wire_bundle_envelope");
     expect(recipe.detector.require_physical_endpoints).toBe(false);
     expect(recipe.detector.skeleton_endpoint_detection).toBe(false);
   });

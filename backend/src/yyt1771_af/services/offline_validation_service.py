@@ -423,6 +423,19 @@ def _point_jump_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
             point_a_jump = _point_distance(previous["point_a"], sample["point_a"])
             point_b_jump = _point_distance(previous["point_b"], sample["point_b"])
             distance_jump = abs(float(sample["distance_px"]) - float(previous["distance_px"]))
+            previous_line_y = _diagnostic_value(previous, "measurement_line_y")
+            current_line_y = _diagnostic_value(sample, "measurement_line_y")
+            diagnostics = sample.get("diagnostics")
+            if isinstance(diagnostics, dict):
+                diagnostics["previous_measurement_line_y"] = previous_line_y
+                diagnostics["line_y_delta_from_previous"] = (
+                    None
+                    if previous_line_y is None or current_line_y is None
+                    else round(abs(float(current_line_y) - float(previous_line_y)), 6)
+                )
+                diagnostics["distance_jump_from_previous"] = round(distance_jump, 6)
+                diagnostics["point_a_jump_from_previous"] = round(point_a_jump, 6)
+                diagnostics["point_b_jump_from_previous"] = round(point_b_jump, 6)
             a_jumps.append(point_a_jump)
             b_jumps.append(point_b_jump)
             distance_jumps.append(distance_jump)
@@ -485,10 +498,15 @@ def _summary(
     interval_histogram = dict(
         sorted(
             Counter(
-                str(int(value)) for value in _diagnostic_values(samples, "object_interval_count")
+                str(int(value))
+                for value in (
+                    _diagnostic_values(samples, "interval_count")
+                    or _diagnostic_values(samples, "object_interval_count")
+                )
             ).items()
         )
     )
+    bundle_spans = _diagnostic_values(valid_samples, "bundle_outer_span_px")
     processed_frames = len(samples)
     valid_frames = len(valid_samples)
     invalid_frames = processed_frames - valid_frames
@@ -522,6 +540,10 @@ def _summary(
             "parallel_error_px_max": _max_or_none(parallel_errors),
             "pattern_mismatch_count": pattern_mismatch_count,
             "object_interval_count_histogram": interval_histogram,
+            "wire_interval_count_histogram": interval_histogram,
+            "bundle_outer_span_px_mean": _mean_or_none(bundle_spans),
+            "bundle_outer_span_px_p95": _p95_or_none(bundle_spans),
+            "bundle_outer_span_px_max": _max_or_none(bundle_spans),
             **{key: point_jump_summary[key] for key in point_jump_summary if key != "reason"},
             "statistics_reason": point_jump_summary["reason"],
             "recipe_snapshot": recipe_snapshot,

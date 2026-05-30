@@ -198,6 +198,8 @@ Recommended initial defaults:
 
 This remains an internal mode of `BalloonEnvelopeDetector`. It must use same-line ROI-local chord contacts after constructing a trustworthy contour source.
 
+For `open_mesh`, `mesh_outer_span` means the outer-to-outer span from the leftmost valid mesh foreground interval to the rightmost valid mesh foreground interval on the selected contact source. It is not a virtual hull, not a filled-envelope edge, and not a ROI-boundary span. Internal mesh gaps may lie between A and B, but A and B themselves must snap to valid foreground interval boundaries. Future auto tune must reject candidates where either formal endpoint exists only on a debug/virtual envelope layer.
+
 ### Wire Strip
 
 Recommended defaults:
@@ -208,7 +210,11 @@ Recommended defaults:
 - use polarity and threshold strategy validated for the strip contrast,
 - boundary rejection enabled.
 
-`WireStripDetector` remains same-line chord based inside the ROI, not endpoint based. Its default pattern is `blank-object-blank-object-blank` and its default measurement mode is `outer_to_outer`.
+`WireStripDetector` remains same-line chord based inside the ROI, not endpoint based. Its current formal pattern is `blank-wire_bundle_envelope-blank` and its only current formal measurement mode is `wire_bundle_envelope`.
+
+For `wire_bundle_envelope`, one ROI-local measurement line may contain multiple valid wire foreground intervals. Internal gaps are wire-bundle spaces, not separate measurement objects and not inner-gap targets. Formal A/B are the left outer boundary of the leftmost valid wire interval and the right outer boundary of the rightmost valid wire interval. They must be real foreground-boundary points, not gap, background, ROI-boundary, virtual-envelope, or rejected/debug points.
+
+Run-time wire detection chooses the current frame's valid candidate line with the largest `formal_ab_span_px`. Previous-frame `measurement_line_y`, A/B jump, and distance jump may be recorded for diagnostics and offline validation, but must not affect formal A/B selection in this stage.
 
 ## Image Quality Precheck
 
@@ -319,6 +325,10 @@ Use these metrics separately for setup tuning, offline validation, and golden-se
 - `parallel_error_px`: A/B same-line parallel error; should stay within the pixel tolerance.
 - `local_y_delta_px`: ROI-local y difference between A and B; should stay within the pixel tolerance.
 - `chord_length_px`: same-line chord length stability.
+- `mesh_outer_span_px`: open-mesh span from leftmost valid foreground interval to rightmost valid foreground interval.
+- `bundle_outer_span_px`: wire-bundle span from leftmost valid wire foreground interval to rightmost valid wire foreground interval.
+- `formal_ab_span_px`: formal A/B segment length; for open mesh this should match `mesh_outer_span_px`, not `virtual_envelope_span_px`.
+- `virtual_envelope_span_px`: debug-only filled/hull span, never proof of formal A/B validity.
 - `processing_fps`: effective frames per second for offline evaluation.
 
 Suggested interpretation:

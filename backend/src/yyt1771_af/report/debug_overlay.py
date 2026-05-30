@@ -179,13 +179,46 @@ def render_detection_debug_overlay_png(
         scaled_roi,
         float(detection.diagnostics.boundary_margin_px or 0.0) * scale_x,
     )
+    measurement_line_y = (
+        None
+        if detection.diagnostics.measurement_line_y is None
+        else float(detection.diagnostics.measurement_line_y) * scale_y
+    )
     _draw_measurement_line(
         pixels,
         display_width,
         scaled_roi,
-        None
-        if detection.diagnostics.measurement_line_y is None
-        else float(detection.diagnostics.measurement_line_y) * scale_y,
+        measurement_line_y,
+    )
+    _draw_interval_segments(
+        pixels,
+        display_width,
+        scaled_roi,
+        detection.diagnostics.raw_intervals,
+        measurement_line_y,
+        scale_x,
+        (60, 180, 255),
+        thickness=1,
+    )
+    _draw_interval_segments(
+        pixels,
+        display_width,
+        scaled_roi,
+        detection.diagnostics.bridged_intervals,
+        measurement_line_y,
+        scale_x,
+        (255, 230, 80),
+        thickness=2,
+    )
+    _draw_interval_segments(
+        pixels,
+        display_width,
+        scaled_roi,
+        detection.diagnostics.selected_valid_intervals,
+        measurement_line_y,
+        scale_x,
+        (80, 255, 180),
+        thickness=3,
     )
 
     if show_rejected_candidates and not detection.valid:
@@ -227,6 +260,8 @@ def render_detection_debug_overlay_png(
     model_text = detection.diagnostics.pattern_model or "-"
     chord = detection.diagnostics.chord_length_px
     chord_text = "-" if chord is None else f"{chord:.2f}"
+    bundle_span = detection.diagnostics.bundle_outer_span_px
+    bundle_text = "-" if bundle_span is None else f"{bundle_span:.2f}"
     parallel_error = detection.diagnostics.parallel_error_px
     parallel_text = "-" if parallel_error is None else f"{parallel_error:.2f}"
     side_text = detection.diagnostics.rejected_contact_side or "-"
@@ -242,10 +277,10 @@ def render_detection_debug_overlay_png(
         scale=2,
     )
     detail_text = (
-        f"FORMAL A/B MODEL:{model_text} PATTERN:{pattern_text} "
-        f"CHORD:{chord_text} PAR_ERR:{parallel_text}"
+        f"FORMAL A/B SEGMENT MODEL:{model_text} PATTERN:{pattern_text} "
+        f"CHORD:{chord_text} BUNDLE:{bundle_text} PAR_ERR:{parallel_text}"
         if detection.valid
-        else f"SIDE:{side_text} RIGHT_MARGIN:{right_text} REJECTED DEBUG CANDIDATES"
+        else (f"SIDE:{side_text} RIGHT_MARGIN:{right_text} {_invalid_candidate_label(detection)}")
     )
     draw_text(
         pixels,
@@ -256,7 +291,23 @@ def render_detection_debug_overlay_png(
         (255, 220, 120),
         scale=2,
     )
+    if detection.diagnostics.virtual_envelope_span_px is not None:
+        draw_text(
+            pixels,
+            display_width,
+            8,
+            58,
+            f"VIRTUAL ENVELOPE DEBUG-ONLY:{detection.diagnostics.virtual_envelope_span_px:.2f}",
+            (255, 174, 66),
+            scale=1,
+        )
     return encode_png(display_width, display_height, pixels)
+
+
+def _invalid_candidate_label(detection: DetectionResult) -> str:
+    if detection.diagnostics.candidate_line_is_debug_only:
+        return "CANDIDATE LINE DEBUG ONLY"
+    return "REJECTED DEBUG CANDIDATES"
 
 
 def _downsample_mask(
@@ -367,3 +418,48 @@ def _draw_measurement_line(
         (120, 255, 255),
         thickness=1,
     )
+    draw_text(
+        pixels,
+        width,
+        int(round(min(x0, x1))) + 4,
+        int(round(min(y0, y1))) + 4,
+        "MEASUREMENT LINE REF",
+        (120, 255, 255),
+        scale=1,
+    )
+
+
+def _draw_interval_segments(
+    pixels: bytearray,
+    width: int,
+    roi: RotatedRoi,
+    intervals: object,
+    measurement_line_y: float | None,
+    scale_x: float,
+    color: tuple[int, int, int],
+    *,
+    thickness: int,
+) -> None:
+    if measurement_line_y is None or not isinstance(intervals, list):
+        return
+    unit_x, unit_y = roi_measurement_direction(roi.angle_deg)
+    perp_x, perp_y = -unit_y, unit_x
+    for interval in intervals:
+        if not hasattr(interval, "start_local_x") or not hasattr(interval, "end_local_x"):
+            continue
+        start_local_x = float(interval.start_local_x) * scale_x
+        end_local_x = float(interval.end_local_x) * scale_x
+        x0 = roi.center_x + start_local_x * unit_x + measurement_line_y * perp_x
+        y0 = roi.center_y + start_local_x * unit_y + measurement_line_y * perp_y
+        x1 = roi.center_x + end_local_x * unit_x + measurement_line_y * perp_x
+        y1 = roi.center_y + end_local_x * unit_y + measurement_line_y * perp_y
+        draw_line(
+            pixels,
+            width,
+            int(round(x0)),
+            int(round(y0)),
+            int(round(x1)),
+            int(round(y1)),
+            color,
+            thickness=thickness,
+        )

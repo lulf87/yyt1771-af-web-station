@@ -1,0 +1,63 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+
+import type { MeasurementDefinition } from "../api/types";
+import { RunPage } from "./RunPage";
+
+const measurementDefinition: MeasurementDefinition = {
+  measurement_definition_id: "md_live",
+  name: "live",
+  target_family: "balloon_envelope",
+  roi: {
+    center_x: 110,
+    center_y: 110,
+    width: 130,
+    height: 80,
+    angle_deg: 0,
+    coordinate_space: "acquisition",
+  },
+  recipe_name: "balloon_envelope_default",
+  segmentation: {
+    polarity: "dark_on_light",
+    threshold_mode: "fixed",
+    threshold_value: 160,
+    blur_kernel: 3,
+    close_kernel: 1,
+    open_kernel: 1,
+    min_component_area_px: 20,
+    fill_internal_holes: false,
+  },
+  detector: {
+    detector_kind: "balloon_envelope_detector",
+    envelope_mode: "open_mesh",
+    contact_source: "bridged_foreground",
+    measurement_model: "blank_object_blank",
+    min_quality: 0.65,
+    max_point_jump_px: 25,
+    reject_contact_on_roi_boundary: true,
+    boundary_margin_px: 4,
+    ignore_internal_texture: true,
+    fill_internal_holes: false,
+    bridge_mesh_gaps: true,
+  },
+  detector_version: "v1",
+  acquisition_frame_size: { width: 320, height: 220 },
+  coordinate_space: "acquisition",
+  created_at_ms: 1000,
+};
+
+describe("RunPage live offline mode", () => {
+  it("keeps batch run and exposes live offline controls", () => {
+    const markup = renderToStaticMarkup(
+      <RunPage measurementDefinition={measurementDefinition} />,
+    );
+
+    expect(markup).toContain("Batch Run");
+    expect(markup).toContain("Live Offline Run");
+    expect(markup).toContain("Open Live Source");
+    expect(markup).toContain("Play");
+    expect(markup).toContain("Step Next");
+    expect(markup).toContain("Seek");
+    expect(markup).toContain("Loop");
+  });
+});

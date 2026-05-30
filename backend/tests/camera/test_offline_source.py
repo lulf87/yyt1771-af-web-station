@@ -65,6 +65,31 @@ def test_offline_source_uses_allow_pickle_false_for_npy(monkeypatch, tmp_path: P
     assert load_calls[-1]["allow_pickle"] is False
 
 
+def test_offline_source_reads_frame_by_index_without_advancing_stream(tmp_path: Path) -> None:
+    for index in [10, 2, 1]:
+        _write_frame(tmp_path / f"frame_{index}.npy", index)
+    source = OfflineFolderCameraSource(tmp_path)
+    source.open()
+
+    indexed = source.read_frame(2)
+    first = source.get_latest_frame()
+
+    assert indexed.frame_index == 2
+    assert indexed.frame_name == "frame_10.npy"
+    assert int(indexed.image[0, 0]) == 10
+    assert first.frame_index == 0
+    assert first.frame_name == "frame_1.npy"
+
+
+def test_offline_source_read_frame_rejects_invalid_index(tmp_path: Path) -> None:
+    _write_frame(tmp_path / "frame_1.npy", 1)
+    source = OfflineFolderCameraSource(tmp_path)
+    source.open()
+
+    with pytest.raises(IndexError, match="outside available frames"):
+        source.read_frame(1)
+
+
 def test_offline_source_does_not_preload_image_arrays(tmp_path: Path) -> None:
     for index in range(5):
         _write_frame(tmp_path / f"frame_{index + 1}.npy", index + 1)

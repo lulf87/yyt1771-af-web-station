@@ -25,7 +25,7 @@ class CameraCloseResponse(BaseModel):
 def open_camera(request: CameraOpenRequest) -> CameraOpenResult:
     try:
         return camera_service.open(request.profile)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

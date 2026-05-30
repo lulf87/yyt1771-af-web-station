@@ -36,7 +36,27 @@ class ContactSelection:
     pattern_model: str | None = None
     detected_pattern: str | None = None
     object_interval_count: int | None = None
+    interval_count: int | None = None
     selected_intervals: list[ObjectInterval] | None = None
+    raw_intervals: list[ObjectInterval] | None = None
+    bridged_intervals: list[ObjectInterval] | None = None
+    selected_valid_intervals: list[ObjectInterval] | None = None
+    leftmost_valid_interval: ObjectInterval | None = None
+    rightmost_valid_interval: ObjectInterval | None = None
+    formal_point_a_source_interval: ObjectInterval | None = None
+    formal_point_b_source_interval: ObjectInterval | None = None
+    point_a_on_foreground_boundary: bool | None = None
+    point_b_on_foreground_boundary: bool | None = None
+    point_a_source_layer: str | None = None
+    point_b_source_layer: str | None = None
+    internal_gap_count: int | None = None
+    max_internal_gap_px: float | None = None
+    mesh_outer_span_px: float | None = None
+    bundle_outer_span_px: float | None = None
+    formal_ab_span_px: float | None = None
+    virtual_envelope_span_px: float | None = None
+    candidate_line_is_debug_only: bool | None = None
+    selected_line_reason: str | None = None
     measurement_mode: str | None = None
 
 
@@ -61,7 +81,27 @@ class ContactDebug:
     pattern_model: str | None = None
     detected_pattern: str | None = None
     object_interval_count: int | None = None
+    interval_count: int | None = None
     selected_intervals: list[ObjectInterval] | None = None
+    raw_intervals: list[ObjectInterval] | None = None
+    bridged_intervals: list[ObjectInterval] | None = None
+    selected_valid_intervals: list[ObjectInterval] | None = None
+    leftmost_valid_interval: ObjectInterval | None = None
+    rightmost_valid_interval: ObjectInterval | None = None
+    formal_point_a_source_interval: ObjectInterval | None = None
+    formal_point_b_source_interval: ObjectInterval | None = None
+    point_a_on_foreground_boundary: bool | None = None
+    point_b_on_foreground_boundary: bool | None = None
+    point_a_source_layer: str | None = None
+    point_b_source_layer: str | None = None
+    internal_gap_count: int | None = None
+    max_internal_gap_px: float | None = None
+    mesh_outer_span_px: float | None = None
+    bundle_outer_span_px: float | None = None
+    formal_ab_span_px: float | None = None
+    virtual_envelope_span_px: float | None = None
+    candidate_line_is_debug_only: bool | None = None
+    selected_line_reason: str | None = None
     measurement_mode: str | None = None
 
 
@@ -91,11 +131,32 @@ class _LineCandidate:
     pattern_model: str
     detected_pattern: str
     object_interval_count: int
+    interval_count: int
     contour_point_count: int
     distance_to_left_roi_boundary_px: float
     distance_to_right_roi_boundary_px: float
     rejected_side: str | None = None
     measurement_mode: str | None = None
+    raw_intervals: list[ObjectInterval] | None = None
+    bridged_intervals: list[ObjectInterval] | None = None
+    selected_valid_intervals: list[ObjectInterval] | None = None
+    leftmost_valid_interval: ObjectInterval | None = None
+    rightmost_valid_interval: ObjectInterval | None = None
+    formal_point_a_source_interval: ObjectInterval | None = None
+    formal_point_b_source_interval: ObjectInterval | None = None
+    point_a_on_foreground_boundary: bool | None = None
+    point_b_on_foreground_boundary: bool | None = None
+    point_a_source_layer: str | None = None
+    point_b_source_layer: str | None = None
+    internal_gap_count: int | None = None
+    max_internal_gap_px: float | None = None
+    mesh_outer_span_px: float | None = None
+    bundle_outer_span_px: float | None = None
+    formal_ab_span_px: float | None = None
+    virtual_envelope_span_px: float | None = None
+    candidate_line_is_debug_only: bool | None = None
+    selected_line_reason: str | None = None
+    score: float = 0.0
 
 
 def rotated_roi_mask(shape: tuple[int, int], roi: RotatedRoi) -> np.ndarray:
@@ -146,6 +207,18 @@ def select_roi_local_chord_contacts_debug(
     reject_contact_on_roi_boundary: bool,
     measurement_mode: str | None = None,
     line_step_px: float = 1.0,
+    allow_mesh_outer_span: bool = False,
+    source_layer: str = "foreground",
+    raw_foreground_mask: np.ndarray | None = None,
+    bridged_foreground_mask: np.ndarray | None = None,
+    filled_envelope_mask: np.ndarray | None = None,
+    min_mesh_interval_width_px: float = 3.0,
+    min_mesh_interval_count: int = 2,
+    max_mesh_interval_width_ratio: float = 0.65,
+    min_neighbor_support_lines: int = 1,
+    bundle_detected_pattern: str = "mesh_outer_span",
+    prefer_largest_formal_span: bool = False,
+    reject_global_foreground_boundary: bool = True,
 ) -> ContactSelection | ContactRejection:
     foreground = np.asarray(mask, dtype=bool)
     edge_mask = contour_mask(foreground)
@@ -171,14 +244,39 @@ def select_roi_local_chord_contacts_debug(
         intervals = _line_intervals(line_mask, local_x_values, local_y)
         if not intervals:
             continue
-        candidate = _build_line_candidate(
-            roi=roi,
-            local_y=local_y,
-            intervals=intervals,
-            pattern_model=pattern_model,
-            measurement_mode=measurement_mode,
-            contour_point_count=contour_count,
-        )
+        if allow_mesh_outer_span:
+            candidate = _build_mesh_outer_span_candidate(
+                foreground=foreground,
+                roi=roi,
+                local_y=local_y,
+                intervals=intervals,
+                pattern_model=pattern_model,
+                measurement_mode=measurement_mode,
+                contour_point_count=contour_count,
+                boundary_margin_px=boundary_margin_px,
+                source_layer=source_layer,
+                raw_foreground_mask=raw_foreground_mask,
+                bridged_foreground_mask=bridged_foreground_mask,
+                filled_envelope_mask=filled_envelope_mask,
+                min_interval_width_px=min_mesh_interval_width_px,
+                min_interval_count=min_mesh_interval_count,
+                max_interval_width_ratio=max_mesh_interval_width_ratio,
+                min_neighbor_support_lines=min_neighbor_support_lines,
+                line_step_px=line_step_px,
+                detected_pattern=bundle_detected_pattern,
+                selected_line_reason=(
+                    "max_formal_ab_span" if prefer_largest_formal_span else "highest_line_score"
+                ),
+            )
+        else:
+            candidate = _build_line_candidate(
+                roi=roi,
+                local_y=local_y,
+                intervals=intervals,
+                pattern_model=pattern_model,
+                measurement_mode=measurement_mode,
+                contour_point_count=contour_count,
+            )
         if candidate is None:
             mismatched.append(
                 _mismatch_candidate(
@@ -188,6 +286,13 @@ def select_roi_local_chord_contacts_debug(
                     pattern_model=pattern_model,
                     measurement_mode=measurement_mode,
                     contour_point_count=contour_count,
+                    raw_intervals=_debug_intervals(raw_foreground_mask, roi, local_y),
+                    bridged_intervals=_debug_intervals(bridged_foreground_mask, roi, local_y),
+                    virtual_envelope_span_px=_virtual_span_px(
+                        filled_envelope_mask,
+                        roi,
+                        local_y,
+                    ),
                 )
             )
             continue
@@ -204,13 +309,25 @@ def select_roi_local_chord_contacts_debug(
         candidates.append(candidate)
 
     if candidates:
-        candidate = _best_line_candidate(candidates)
-        if global_margins is not None and reject_contact_on_roi_boundary:
+        candidate = _best_line_candidate(
+            candidates,
+            prefer_largest_formal_span=prefer_largest_formal_span,
+        )
+        if (
+            global_margins is not None
+            and reject_contact_on_roi_boundary
+            and reject_global_foreground_boundary
+        ):
             left_rejected = global_margins.left_margin_px <= boundary_margin_px
             right_rejected = global_margins.right_margin_px <= boundary_margin_px
             if left_rejected or right_rejected:
                 candidate = (
-                    _best_line_candidate(rejected_boundary) if rejected_boundary else candidate
+                    _best_line_candidate(
+                        rejected_boundary,
+                        prefer_largest_formal_span=prefer_largest_formal_span,
+                    )
+                    if rejected_boundary
+                    else candidate
                 )
                 return ContactRejection(
                     status=DetectionStatus.CALIPER_CONTACT_ON_ROI_BOUNDARY,
@@ -225,13 +342,19 @@ def select_roi_local_chord_contacts_debug(
                 )
         return _candidate_to_selection(candidate)
     if rejected_boundary:
-        candidate = _best_line_candidate(rejected_boundary)
+        candidate = _best_line_candidate(
+            rejected_boundary,
+            prefer_largest_formal_span=prefer_largest_formal_span,
+        )
         return ContactRejection(
             status=DetectionStatus.CALIPER_CONTACT_ON_ROI_BOUNDARY,
             debug=_candidate_to_debug(candidate, roi, boundary_margin_px),
         )
     if mismatched:
-        candidate = _best_line_candidate(mismatched)
+        candidate = _best_line_candidate(
+            mismatched,
+            prefer_largest_formal_span=prefer_largest_formal_span,
+        )
         return ContactRejection(
             status=DetectionStatus.OBJECT_INTERVAL_COUNT_MISMATCH,
             debug=_candidate_to_debug(candidate, roi, boundary_margin_px),
@@ -389,7 +512,27 @@ def valid_result(
             pattern_model=selection.pattern_model,
             detected_pattern=selection.detected_pattern,
             object_interval_count=selection.object_interval_count,
+            interval_count=selection.interval_count,
             selected_intervals=selection.selected_intervals,
+            raw_intervals=selection.raw_intervals,
+            bridged_intervals=selection.bridged_intervals,
+            selected_valid_intervals=selection.selected_valid_intervals,
+            leftmost_valid_interval=selection.leftmost_valid_interval,
+            rightmost_valid_interval=selection.rightmost_valid_interval,
+            formal_point_a_source_interval=selection.formal_point_a_source_interval,
+            formal_point_b_source_interval=selection.formal_point_b_source_interval,
+            point_a_on_foreground_boundary=selection.point_a_on_foreground_boundary,
+            point_b_on_foreground_boundary=selection.point_b_on_foreground_boundary,
+            point_a_source_layer=selection.point_a_source_layer,
+            point_b_source_layer=selection.point_b_source_layer,
+            internal_gap_count=selection.internal_gap_count,
+            max_internal_gap_px=selection.max_internal_gap_px,
+            mesh_outer_span_px=selection.mesh_outer_span_px,
+            bundle_outer_span_px=selection.bundle_outer_span_px,
+            formal_ab_span_px=selection.formal_ab_span_px,
+            virtual_envelope_span_px=selection.virtual_envelope_span_px,
+            candidate_line_is_debug_only=selection.candidate_line_is_debug_only,
+            selected_line_reason=selection.selected_line_reason,
             measurement_mode=selection.measurement_mode,
         ),
     )
@@ -580,6 +723,96 @@ def _merge_close_intervals(
     return merged
 
 
+def _valid_mesh_intervals(
+    intervals: list[ObjectInterval],
+    *,
+    roi: RotatedRoi,
+    boundary_margin_px: float,
+    min_interval_width_px: float,
+    max_interval_width_ratio: float,
+    enforce_boundary_margin: bool = True,
+) -> list[ObjectInterval]:
+    max_width = max_interval_width_ratio * roi.width
+    valid: list[ObjectInterval] = []
+    for interval in intervals:
+        left_margin = interval.start_local_x + roi.width / 2.0
+        right_margin = roi.width / 2.0 - interval.end_local_x
+        if interval.width_px < min_interval_width_px:
+            continue
+        if interval.width_px > max_width:
+            continue
+        if enforce_boundary_margin and (
+            left_margin <= boundary_margin_px or right_margin <= boundary_margin_px
+        ):
+            continue
+        valid.append(interval)
+    return valid
+
+
+def _debug_intervals(
+    mask: np.ndarray | None,
+    roi: RotatedRoi,
+    local_y: float,
+) -> list[ObjectInterval] | None:
+    if mask is None:
+        return None
+    line_mask, local_x_values = _sample_mask_line(np.asarray(mask, dtype=bool), roi, local_y)
+    return _line_intervals(line_mask, local_x_values, local_y)
+
+
+def _virtual_span_px(
+    mask: np.ndarray | None,
+    roi: RotatedRoi,
+    local_y: float,
+) -> float | None:
+    intervals = _debug_intervals(mask, roi, local_y)
+    if not intervals:
+        return None
+    return max(0.0, intervals[-1].end_local_x - intervals[0].start_local_x)
+
+
+def _interval_gaps(intervals: list[ObjectInterval]) -> list[float]:
+    return [
+        max(0.0, right.start_local_x - left.end_local_x)
+        for left, right in zip(intervals, intervals[1:], strict=False)
+    ]
+
+
+def _neighbor_support_line_count(
+    *,
+    foreground: np.ndarray,
+    roi: RotatedRoi,
+    local_y: float,
+    selected_intervals: list[ObjectInterval],
+    boundary_margin_px: float,
+    min_interval_width_px: float,
+    max_interval_width_ratio: float,
+    line_step_px: float,
+) -> int:
+    support = 0
+    selected_start = selected_intervals[0].start_local_x
+    selected_end = selected_intervals[-1].end_local_x
+    for neighbor_y in (local_y - line_step_px, local_y + line_step_px):
+        if abs(neighbor_y) > roi.height / 2.0:
+            continue
+        line_mask, local_x_values = _sample_mask_line(foreground, roi, neighbor_y)
+        intervals = _valid_mesh_intervals(
+            _line_intervals(line_mask, local_x_values, neighbor_y),
+            roi=roi,
+            boundary_margin_px=boundary_margin_px,
+            min_interval_width_px=min_interval_width_px,
+            max_interval_width_ratio=max_interval_width_ratio,
+        )
+        if len(intervals) < 2:
+            continue
+        neighbor_start = intervals[0].start_local_x
+        neighbor_end = intervals[-1].end_local_x
+        overlap = min(selected_end, neighbor_end) - max(selected_start, neighbor_start)
+        if overlap > 0:
+            support += 1
+    return support
+
+
 def _build_line_candidate(
     *,
     roi: RotatedRoi,
@@ -611,6 +844,125 @@ def _build_line_candidate(
     )
 
 
+def _build_mesh_outer_span_candidate(
+    *,
+    foreground: np.ndarray,
+    roi: RotatedRoi,
+    local_y: float,
+    intervals: list[ObjectInterval],
+    pattern_model: str,
+    measurement_mode: str | None,
+    contour_point_count: int,
+    boundary_margin_px: float,
+    source_layer: str,
+    raw_foreground_mask: np.ndarray | None,
+    bridged_foreground_mask: np.ndarray | None,
+    filled_envelope_mask: np.ndarray | None,
+    min_interval_width_px: float,
+    min_interval_count: int,
+    max_interval_width_ratio: float,
+    min_neighbor_support_lines: int,
+    line_step_px: float,
+    detected_pattern: str,
+    selected_line_reason: str,
+) -> _LineCandidate | None:
+    supported_intervals = _valid_mesh_intervals(
+        intervals,
+        roi=roi,
+        boundary_margin_px=boundary_margin_px,
+        min_interval_width_px=min_interval_width_px,
+        max_interval_width_ratio=max_interval_width_ratio,
+        enforce_boundary_margin=False,
+    )
+    valid_intervals = _valid_mesh_intervals(
+        supported_intervals,
+        roi=roi,
+        boundary_margin_px=boundary_margin_px,
+        min_interval_width_px=min_interval_width_px,
+        max_interval_width_ratio=max_interval_width_ratio,
+    )
+    raw_intervals = _debug_intervals(raw_foreground_mask, roi, local_y)
+    bridged_intervals = _debug_intervals(bridged_foreground_mask, roi, local_y)
+    virtual_span = _virtual_span_px(filled_envelope_mask, roi, local_y)
+    if len(valid_intervals) < min_interval_count and len(supported_intervals) >= min_interval_count:
+        valid_intervals = supported_intervals
+    if len(valid_intervals) < min_interval_count:
+        return None
+    has_boundary_contact = any(
+        interval.start_local_x + roi.width / 2.0 <= boundary_margin_px
+        or roi.width / 2.0 - interval.end_local_x <= boundary_margin_px
+        for interval in valid_intervals
+    )
+
+    if has_boundary_contact:
+        neighbor_support = 0
+    else:
+        neighbor_support = _neighbor_support_line_count(
+            foreground=foreground,
+            roi=roi,
+            local_y=local_y,
+            selected_intervals=valid_intervals,
+            boundary_margin_px=boundary_margin_px,
+            min_interval_width_px=min_interval_width_px,
+            max_interval_width_ratio=max_interval_width_ratio,
+            line_step_px=line_step_px,
+        )
+        if neighbor_support < min_neighbor_support_lines:
+            return None
+
+    leftmost = valid_intervals[0]
+    rightmost = valid_intervals[-1]
+    mesh_outer_span = max(0.0, rightmost.end_local_x - leftmost.start_local_x)
+    gaps = _interval_gaps(valid_intervals)
+    total_support_width = sum(interval.width_px for interval in valid_intervals)
+    coverage_ratio = total_support_width / max(mesh_outer_span, 1.0)
+    left_margin = leftmost.start_local_x + roi.width / 2.0
+    right_margin = roi.width / 2.0 - rightmost.end_local_x
+    max_gap = max(gaps) if gaps else 0.0
+    score = (
+        mesh_outer_span
+        + len(valid_intervals) * 5.0
+        + total_support_width * 0.25
+        + coverage_ratio * 25.0
+        + neighbor_support * 8.0
+        + min(left_margin, right_margin) * 0.1
+        - max_gap * 0.05
+    )
+    return _candidate_from_local_span(
+        roi=roi,
+        local_y=local_y,
+        point_a_x=leftmost.start_local_x,
+        point_b_x=rightmost.end_local_x,
+        intervals=valid_intervals,
+        pattern_model=pattern_model,
+        detected_pattern=detected_pattern,
+        measurement_mode=measurement_mode,
+        contour_point_count=contour_point_count,
+        raw_intervals=raw_intervals,
+        bridged_intervals=bridged_intervals,
+        selected_valid_intervals=valid_intervals,
+        leftmost_valid_interval=leftmost,
+        rightmost_valid_interval=rightmost,
+        formal_point_a_source_interval=leftmost,
+        formal_point_b_source_interval=rightmost,
+        point_a_on_foreground_boundary=True,
+        point_b_on_foreground_boundary=True,
+        point_a_source_layer=source_layer,
+        point_b_source_layer=source_layer,
+        internal_gap_count=len(gaps),
+        max_internal_gap_px=max_gap,
+        mesh_outer_span_px=mesh_outer_span,
+        bundle_outer_span_px=mesh_outer_span
+        if detected_pattern == "wire_bundle_envelope"
+        else None,
+        formal_ab_span_px=mesh_outer_span,
+        virtual_envelope_span_px=virtual_span,
+        candidate_line_is_debug_only=False,
+        selected_line_reason=selected_line_reason,
+        score=score,
+    )
+
+
 def _mismatch_candidate(
     *,
     roi: RotatedRoi,
@@ -619,6 +971,9 @@ def _mismatch_candidate(
     pattern_model: str,
     measurement_mode: str | None,
     contour_point_count: int,
+    raw_intervals: list[ObjectInterval] | None = None,
+    bridged_intervals: list[ObjectInterval] | None = None,
+    virtual_envelope_span_px: float | None = None,
 ) -> _LineCandidate:
     return _candidate_from_local_span(
         roi=roi,
@@ -630,6 +985,10 @@ def _mismatch_candidate(
         detected_pattern=_detected_pattern(len(intervals)),
         measurement_mode=measurement_mode,
         contour_point_count=contour_point_count,
+        raw_intervals=raw_intervals,
+        bridged_intervals=bridged_intervals,
+        virtual_envelope_span_px=virtual_envelope_span_px,
+        candidate_line_is_debug_only=True,
     )
 
 
@@ -644,6 +1003,26 @@ def _candidate_from_local_span(
     detected_pattern: str,
     measurement_mode: str | None,
     contour_point_count: int,
+    raw_intervals: list[ObjectInterval] | None = None,
+    bridged_intervals: list[ObjectInterval] | None = None,
+    selected_valid_intervals: list[ObjectInterval] | None = None,
+    leftmost_valid_interval: ObjectInterval | None = None,
+    rightmost_valid_interval: ObjectInterval | None = None,
+    formal_point_a_source_interval: ObjectInterval | None = None,
+    formal_point_b_source_interval: ObjectInterval | None = None,
+    point_a_on_foreground_boundary: bool | None = None,
+    point_b_on_foreground_boundary: bool | None = None,
+    point_a_source_layer: str | None = None,
+    point_b_source_layer: str | None = None,
+    internal_gap_count: int | None = None,
+    max_internal_gap_px: float | None = None,
+    mesh_outer_span_px: float | None = None,
+    bundle_outer_span_px: float | None = None,
+    formal_ab_span_px: float | None = None,
+    virtual_envelope_span_px: float | None = None,
+    candidate_line_is_debug_only: bool | None = None,
+    selected_line_reason: str | None = None,
+    score: float = 0.0,
 ) -> _LineCandidate:
     point_a_local = Point2D(
         x=float(point_a_x),
@@ -668,35 +1047,72 @@ def _candidate_from_local_span(
         pattern_model=pattern_model,
         detected_pattern=detected_pattern,
         object_interval_count=len(intervals),
+        interval_count=len(intervals),
         contour_point_count=contour_point_count,
         distance_to_left_roi_boundary_px=float(point_a_x + roi.width / 2.0),
         distance_to_right_roi_boundary_px=float(roi.width / 2.0 - point_b_x),
         measurement_mode=measurement_mode,
+        raw_intervals=raw_intervals,
+        bridged_intervals=bridged_intervals,
+        selected_valid_intervals=selected_valid_intervals,
+        leftmost_valid_interval=leftmost_valid_interval,
+        rightmost_valid_interval=rightmost_valid_interval,
+        formal_point_a_source_interval=formal_point_a_source_interval,
+        formal_point_b_source_interval=formal_point_b_source_interval,
+        point_a_on_foreground_boundary=point_a_on_foreground_boundary,
+        point_b_on_foreground_boundary=point_b_on_foreground_boundary,
+        point_a_source_layer=point_a_source_layer,
+        point_b_source_layer=point_b_source_layer,
+        internal_gap_count=internal_gap_count,
+        max_internal_gap_px=max_internal_gap_px,
+        mesh_outer_span_px=mesh_outer_span_px,
+        bundle_outer_span_px=bundle_outer_span_px,
+        formal_ab_span_px=formal_ab_span_px,
+        virtual_envelope_span_px=virtual_envelope_span_px,
+        candidate_line_is_debug_only=candidate_line_is_debug_only,
+        selected_line_reason=selected_line_reason,
+        score=score,
     )
 
 
 def _expected_interval_count(pattern_model: str) -> int | None:
     if pattern_model == "blank_object_blank":
         return 1
-    if pattern_model == "blank_object_blank_object_blank":
-        return 2
     return None
 
 
 def _detected_pattern(interval_count: int) -> str:
     if interval_count == 1:
         return "blank_object_blank"
-    if interval_count == 2:
-        return "blank_object_blank_object_blank"
-    if interval_count > 2:
+    if interval_count > 1:
         return "multiple_object_intervals"
     return "blank"
 
 
-def _best_line_candidate(candidates: list[_LineCandidate]) -> _LineCandidate:
+def _best_line_candidate(
+    candidates: list[_LineCandidate],
+    *,
+    prefer_largest_formal_span: bool = False,
+) -> _LineCandidate:
+    if prefer_largest_formal_span:
+        return max(
+            candidates,
+            key=lambda candidate: (
+                candidate.formal_ab_span_px
+                if candidate.formal_ab_span_px is not None
+                else candidate.chord_length_px,
+                candidate.score,
+                candidate.chord_length_px,
+                -abs(candidate.measurement_line_y),
+            ),
+        )
     return max(
         candidates,
-        key=lambda candidate: (candidate.chord_length_px, -abs(candidate.measurement_line_y)),
+        key=lambda candidate: (
+            candidate.score,
+            candidate.chord_length_px,
+            -abs(candidate.measurement_line_y),
+        ),
     )
 
 
@@ -712,11 +1128,34 @@ def _replace_rejected_side(candidate: _LineCandidate, rejected_side: str | None)
         pattern_model=candidate.pattern_model,
         detected_pattern=candidate.detected_pattern,
         object_interval_count=candidate.object_interval_count,
+        interval_count=candidate.interval_count,
         contour_point_count=candidate.contour_point_count,
         distance_to_left_roi_boundary_px=candidate.distance_to_left_roi_boundary_px,
         distance_to_right_roi_boundary_px=candidate.distance_to_right_roi_boundary_px,
         rejected_side=rejected_side,
         measurement_mode=candidate.measurement_mode,
+        raw_intervals=candidate.raw_intervals,
+        bridged_intervals=candidate.bridged_intervals,
+        selected_valid_intervals=candidate.selected_valid_intervals,
+        leftmost_valid_interval=candidate.leftmost_valid_interval,
+        rightmost_valid_interval=candidate.rightmost_valid_interval,
+        formal_point_a_source_interval=candidate.formal_point_a_source_interval,
+        formal_point_b_source_interval=candidate.formal_point_b_source_interval,
+        point_a_on_foreground_boundary=candidate.point_a_on_foreground_boundary,
+        point_b_on_foreground_boundary=candidate.point_b_on_foreground_boundary,
+        point_a_source_layer=candidate.point_a_source_layer,
+        point_b_source_layer=candidate.point_b_source_layer,
+        internal_gap_count=candidate.internal_gap_count,
+        max_internal_gap_px=candidate.max_internal_gap_px,
+        mesh_outer_span_px=candidate.mesh_outer_span_px,
+        bundle_outer_span_px=candidate.bundle_outer_span_px,
+        formal_ab_span_px=candidate.formal_ab_span_px,
+        virtual_envelope_span_px=candidate.virtual_envelope_span_px,
+        candidate_line_is_debug_only=True
+        if candidate.candidate_line_is_debug_only is None
+        else candidate.candidate_line_is_debug_only,
+        selected_line_reason=candidate.selected_line_reason,
+        score=candidate.score,
     )
 
 
@@ -739,7 +1178,27 @@ def _candidate_to_selection(candidate: _LineCandidate) -> ContactSelection:
         pattern_model=candidate.pattern_model,
         detected_pattern=candidate.detected_pattern,
         object_interval_count=candidate.object_interval_count,
+        interval_count=candidate.interval_count,
         selected_intervals=candidate.intervals,
+        raw_intervals=candidate.raw_intervals,
+        bridged_intervals=candidate.bridged_intervals,
+        selected_valid_intervals=candidate.selected_valid_intervals,
+        leftmost_valid_interval=candidate.leftmost_valid_interval,
+        rightmost_valid_interval=candidate.rightmost_valid_interval,
+        formal_point_a_source_interval=candidate.formal_point_a_source_interval,
+        formal_point_b_source_interval=candidate.formal_point_b_source_interval,
+        point_a_on_foreground_boundary=candidate.point_a_on_foreground_boundary,
+        point_b_on_foreground_boundary=candidate.point_b_on_foreground_boundary,
+        point_a_source_layer=candidate.point_a_source_layer,
+        point_b_source_layer=candidate.point_b_source_layer,
+        internal_gap_count=candidate.internal_gap_count,
+        max_internal_gap_px=candidate.max_internal_gap_px,
+        mesh_outer_span_px=candidate.mesh_outer_span_px,
+        bundle_outer_span_px=candidate.bundle_outer_span_px,
+        formal_ab_span_px=candidate.formal_ab_span_px,
+        virtual_envelope_span_px=candidate.virtual_envelope_span_px,
+        candidate_line_is_debug_only=candidate.candidate_line_is_debug_only,
+        selected_line_reason=candidate.selected_line_reason,
         measurement_mode=candidate.measurement_mode,
     )
 
@@ -767,7 +1226,29 @@ def _candidate_to_debug(
         pattern_model=candidate.pattern_model,
         detected_pattern=candidate.detected_pattern,
         object_interval_count=candidate.object_interval_count,
+        interval_count=candidate.interval_count,
         selected_intervals=candidate.intervals,
+        raw_intervals=candidate.raw_intervals,
+        bridged_intervals=candidate.bridged_intervals,
+        selected_valid_intervals=candidate.selected_valid_intervals,
+        leftmost_valid_interval=candidate.leftmost_valid_interval,
+        rightmost_valid_interval=candidate.rightmost_valid_interval,
+        formal_point_a_source_interval=candidate.formal_point_a_source_interval,
+        formal_point_b_source_interval=candidate.formal_point_b_source_interval,
+        point_a_on_foreground_boundary=candidate.point_a_on_foreground_boundary,
+        point_b_on_foreground_boundary=candidate.point_b_on_foreground_boundary,
+        point_a_source_layer=candidate.point_a_source_layer,
+        point_b_source_layer=candidate.point_b_source_layer,
+        internal_gap_count=candidate.internal_gap_count,
+        max_internal_gap_px=candidate.max_internal_gap_px,
+        mesh_outer_span_px=candidate.mesh_outer_span_px,
+        bundle_outer_span_px=candidate.bundle_outer_span_px,
+        formal_ab_span_px=candidate.formal_ab_span_px,
+        virtual_envelope_span_px=candidate.virtual_envelope_span_px,
+        candidate_line_is_debug_only=True
+        if candidate.candidate_line_is_debug_only is None
+        else candidate.candidate_line_is_debug_only,
+        selected_line_reason=candidate.selected_line_reason,
         measurement_mode=candidate.measurement_mode,
     )
 
@@ -792,7 +1273,27 @@ def _chord_debug(
     chord_length_px: float | None = None,
     detected_pattern: str | None = None,
     object_interval_count: int | None = None,
+    interval_count: int | None = None,
     selected_intervals: list[ObjectInterval] | None = None,
+    raw_intervals: list[ObjectInterval] | None = None,
+    bridged_intervals: list[ObjectInterval] | None = None,
+    selected_valid_intervals: list[ObjectInterval] | None = None,
+    leftmost_valid_interval: ObjectInterval | None = None,
+    rightmost_valid_interval: ObjectInterval | None = None,
+    formal_point_a_source_interval: ObjectInterval | None = None,
+    formal_point_b_source_interval: ObjectInterval | None = None,
+    point_a_on_foreground_boundary: bool | None = None,
+    point_b_on_foreground_boundary: bool | None = None,
+    point_a_source_layer: str | None = None,
+    point_b_source_layer: str | None = None,
+    internal_gap_count: int | None = None,
+    max_internal_gap_px: float | None = None,
+    mesh_outer_span_px: float | None = None,
+    bundle_outer_span_px: float | None = None,
+    formal_ab_span_px: float | None = None,
+    virtual_envelope_span_px: float | None = None,
+    candidate_line_is_debug_only: bool | None = None,
+    selected_line_reason: str | None = None,
 ) -> ContactDebug:
     return ContactDebug(
         contour_point_count=contour_point_count,
@@ -818,7 +1319,27 @@ def _chord_debug(
         pattern_model=pattern_model,
         detected_pattern=detected_pattern,
         object_interval_count=object_interval_count,
+        interval_count=interval_count,
         selected_intervals=selected_intervals,
+        raw_intervals=raw_intervals,
+        bridged_intervals=bridged_intervals,
+        selected_valid_intervals=selected_valid_intervals,
+        leftmost_valid_interval=leftmost_valid_interval,
+        rightmost_valid_interval=rightmost_valid_interval,
+        formal_point_a_source_interval=formal_point_a_source_interval,
+        formal_point_b_source_interval=formal_point_b_source_interval,
+        point_a_on_foreground_boundary=point_a_on_foreground_boundary,
+        point_b_on_foreground_boundary=point_b_on_foreground_boundary,
+        point_a_source_layer=point_a_source_layer,
+        point_b_source_layer=point_b_source_layer,
+        internal_gap_count=internal_gap_count,
+        max_internal_gap_px=max_internal_gap_px,
+        mesh_outer_span_px=mesh_outer_span_px,
+        bundle_outer_span_px=bundle_outer_span_px,
+        formal_ab_span_px=formal_ab_span_px,
+        virtual_envelope_span_px=virtual_envelope_span_px,
+        candidate_line_is_debug_only=candidate_line_is_debug_only,
+        selected_line_reason=selected_line_reason,
         measurement_mode=measurement_mode,
     )
 

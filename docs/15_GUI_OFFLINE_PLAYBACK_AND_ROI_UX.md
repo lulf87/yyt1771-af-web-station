@@ -84,7 +84,9 @@ If detection is invalid, A/B and distance show `N/A`; the UI does not invent coo
 
 ## Run Overlay
 
-The Run page now includes a latest-frame visual area after a run starts.
+The Run page includes a visual frame area for both Batch Run results and Live Offline Run.
+
+Batch Run displays the latest stored sample after the synchronous batch returns. Live Offline Run displays each simulated camera frame as the browser requests it.
 
 It displays:
 
@@ -94,7 +96,7 @@ It displays:
 - A/B line,
 - status, distance, quality, and temperature summary.
 
-The current run loop remains a simple synchronous MVP. For full dynamic inspection of many offline frames, use Offline Playback.
+Use Live Offline Run for dynamic inspection of many offline frames with per-frame detector execution. Use Offline Playback when reviewing existing offline validation outputs such as `evaluation_samples.jsonl`.
 
 ## Offline Playback Page
 

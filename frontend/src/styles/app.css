@@ -233,6 +233,12 @@ select {
   stroke-width: 2;
 }
 
+.selected-interval-segment {
+  stroke: #22c55e;
+  stroke-width: 4;
+  opacity: 0.82;
+}
+
 .point {
   stroke: #ffffff;
   stroke-width: 1.5;
@@ -244,6 +250,24 @@ select {
 
 .point-b {
   fill: #b45309;
+}
+
+.rejected-debug-line {
+  stroke: #b42318;
+  stroke-dasharray: 8 6;
+  stroke-width: 2;
+}
+
+.rejected-debug-point {
+  fill: #b42318;
+  stroke: #ffffff;
+  stroke-width: 1.5;
+}
+
+.rejected-debug-label {
+  fill: #b42318;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .setup-panel {
@@ -269,6 +293,10 @@ select {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
+}
+
+.segmented-control.two-up {
+  grid-template-columns: 1fr 1fr;
 }
 
 .segment.active {
@@ -401,6 +429,15 @@ select {
 
 .compact-metrics {
   margin-top: 10px;
+}
+
+.range-field {
+  display: grid;
+  gap: 6px;
+}
+
+.range-field input {
+  padding: 0;
 }
 
 .button-row {

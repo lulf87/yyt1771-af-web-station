@@ -62,12 +62,28 @@ class OfflineFolderCameraSource:
     def frame_names(self) -> list[str]:
         return [path.name for path in self._files]
 
+    @property
+    def frame_paths(self) -> list[Path]:
+        return list(self._files)
+
     def peek_frame(self) -> Frame:
         if not self._opened:
             raise RuntimeError("offline camera source is not opened")
         if not self._files:
             raise EndOfOfflineStreamError("offline source has no frames")
         return self._frame_from_path(self._files[0], frame_index=0, advance_counter=False)
+
+    def read_frame(self, frame_index: int) -> Frame:
+        if not self._opened:
+            raise RuntimeError("offline camera source is not opened")
+        if frame_index < 0 or frame_index >= len(self._files):
+            raise IndexError("offline frame index is outside available frames")
+        return self._frame_from_path(
+            self._files[frame_index],
+            frame_index=frame_index,
+            advance_counter=False,
+            frame_id=frame_index + 1,
+        )
 
     def frame_info(self, frame_index: int) -> OfflineFrameInfo:
         if frame_index < 0 or frame_index >= len(self._files):
@@ -97,17 +113,26 @@ class OfflineFolderCameraSource:
         self._index += 1
         return self._frame_from_path(frame_path, frame_index=frame_index, advance_counter=True)
 
-    def _frame_from_path(self, path: Path, *, frame_index: int, advance_counter: bool) -> Frame:
+    def _frame_from_path(
+        self,
+        path: Path,
+        *,
+        frame_index: int,
+        advance_counter: bool,
+        frame_id: int | None = None,
+    ) -> Frame:
         image = _load_frame(path)
         _require_grayscale(image, path)
         image = np.clip(np.asarray(image), 0, 255).astype(np.uint8, copy=False)
-        if advance_counter:
+        if frame_id is not None:
+            resolved_frame_id = frame_id
+        elif advance_counter:
             self._frame_counter += 1
-            frame_id = self._frame_counter
+            resolved_frame_id = self._frame_counter
         else:
-            frame_id = self._frame_counter + 1
+            resolved_frame_id = self._frame_counter + 1
         return Frame(
-            frame_id=frame_id,
+            frame_id=resolved_frame_id,
             timestamp_ms=time.time_ns() // 1_000_000,
             width=int(image.shape[1]),
             height=int(image.shape[0]),

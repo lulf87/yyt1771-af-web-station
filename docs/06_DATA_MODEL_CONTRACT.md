@@ -115,8 +115,8 @@ class BalloonEnvelopeDetectorParams(BaseModel):
 
 class WireStripDetectorParams(BaseModel):
     detector_kind: Literal[DetectorKind.WIRE_STRIP_DETECTOR] = DetectorKind.WIRE_STRIP_DETECTOR
-    measurement_model: Literal["blank_object_blank_object_blank"] = "blank_object_blank_object_blank"
-    measurement_mode: Literal["outer_to_outer"] = "outer_to_outer"
+    measurement_model: Literal["blank_wire_bundle_envelope_blank"] = "blank_wire_bundle_envelope_blank"
+    measurement_mode: Literal["wire_bundle_envelope"] = "wire_bundle_envelope"
     min_quality: float = 0.60
     max_point_jump_px: float | None = 20.0
     reject_contact_on_roi_boundary: bool = True
@@ -184,8 +184,33 @@ class DetectionDiagnostics(BaseModel):
     pattern_model: str | None = None
     detected_pattern: str | None = None
     object_interval_count: int | None = None
+    interval_count: int | None = None
     selected_intervals: list[dict] | None = None
+    raw_intervals: list[dict] | None = None
+    bridged_intervals: list[dict] | None = None
+    selected_valid_intervals: list[dict] | None = None
+    leftmost_valid_interval: dict | None = None
+    rightmost_valid_interval: dict | None = None
+    formal_point_a_source_interval: dict | None = None
+    formal_point_b_source_interval: dict | None = None
+    point_a_on_foreground_boundary: bool | None = None
+    point_b_on_foreground_boundary: bool | None = None
+    point_a_source_layer: str | None = None
+    point_b_source_layer: str | None = None
+    internal_gap_count: int | None = None
+    max_internal_gap_px: float | None = None
+    mesh_outer_span_px: float | None = None
+    bundle_outer_span_px: float | None = None
+    formal_ab_span_px: float | None = None
+    virtual_envelope_span_px: float | None = None
+    candidate_line_is_debug_only: bool | None = None
+    selected_line_reason: str | None = None
     measurement_mode: str | None = None
+    previous_measurement_line_y: float | None = None
+    line_y_delta_from_previous: float | None = None
+    distance_jump_from_previous: float | None = None
+    point_a_jump_from_previous: float | None = None
+    point_b_jump_from_previous: float | None = None
     selected_component_area_px: int | None = None
     selected_component_bbox: dict | None = None
     candidate_component_count: int | None = None
@@ -252,8 +277,8 @@ Run-time detection must use this confirmed `segmentation` and `detector` snapsho
 The saved detector snapshot must include the measurement contract parameters:
 
 - `BalloonEnvelopeDetectorParams.measurement_model = "blank_object_blank"`
-- `WireStripDetectorParams.measurement_model = "blank_object_blank_object_blank"`
-- `WireStripDetectorParams.measurement_mode = "outer_to_outer"`
+- `WireStripDetectorParams.measurement_model = "blank_wire_bundle_envelope_blank"`
+- `WireStripDetectorParams.measurement_mode = "wire_bundle_envelope"`
 - detector version
 
 Formal A/B points remain in acquisition coordinates. ROI-local A/B, `measurement_line_y`, `local_y_delta_px`, and `parallel_error_px` are diagnostics that verify the same-line chord contract.

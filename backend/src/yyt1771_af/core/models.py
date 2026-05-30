@@ -125,10 +125,10 @@ class BalloonEnvelopeDetectorParams(BaseModel):
 
 class WireStripDetectorParams(BaseModel):
     detector_kind: Literal[DetectorKind.WIRE_STRIP_DETECTOR] = DetectorKind.WIRE_STRIP_DETECTOR
-    measurement_model: Literal["blank_object_blank_object_blank"] = (
-        "blank_object_blank_object_blank"
+    measurement_model: Literal["blank_wire_bundle_envelope_blank"] = (
+        "blank_wire_bundle_envelope_blank"
     )
-    measurement_mode: Literal["outer_to_outer"] = "outer_to_outer"
+    measurement_mode: Literal["wire_bundle_envelope"] = "wire_bundle_envelope"
     min_quality: float = Field(default=0.60, ge=0.0, le=1.0)
     max_point_jump_px: float | None = Field(default=20.0, gt=0.0)
     reject_contact_on_roi_boundary: bool = True
@@ -206,8 +206,33 @@ class DetectionDiagnostics(BaseModel):
     pattern_model: str | None = None
     detected_pattern: str | None = None
     object_interval_count: int | None = None
+    interval_count: int | None = None
     selected_intervals: list[ObjectInterval] | None = None
+    raw_intervals: list[ObjectInterval] | None = None
+    bridged_intervals: list[ObjectInterval] | None = None
+    selected_valid_intervals: list[ObjectInterval] | None = None
+    leftmost_valid_interval: ObjectInterval | None = None
+    rightmost_valid_interval: ObjectInterval | None = None
+    formal_point_a_source_interval: ObjectInterval | None = None
+    formal_point_b_source_interval: ObjectInterval | None = None
+    point_a_on_foreground_boundary: bool | None = None
+    point_b_on_foreground_boundary: bool | None = None
+    point_a_source_layer: str | None = None
+    point_b_source_layer: str | None = None
+    internal_gap_count: int | None = None
+    max_internal_gap_px: float | None = None
+    mesh_outer_span_px: float | None = None
+    bundle_outer_span_px: float | None = None
+    formal_ab_span_px: float | None = None
+    virtual_envelope_span_px: float | None = None
+    candidate_line_is_debug_only: bool | None = None
+    selected_line_reason: str | None = None
     measurement_mode: str | None = None
+    previous_measurement_line_y: float | None = None
+    line_y_delta_from_previous: float | None = None
+    distance_jump_from_previous: float | None = None
+    point_a_jump_from_previous: float | None = None
+    point_b_jump_from_previous: float | None = None
     foreground_area_px: int | None = None
     foreground_area_ratio_in_roi: float | None = None
     selected_component_area_px: int | None = None

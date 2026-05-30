@@ -79,4 +79,68 @@ describe("FrameCanvas", () => {
     expect(markup).not.toContain("point point-a");
     expect(markup).not.toContain("point point-b");
   });
+
+  it("marks rejected candidates as debug-only for invalid detections", () => {
+    const invalidDetection: SetupDetectResponse = {
+      status: "caliper_contact_on_roi_boundary",
+      valid: false,
+      point_a: null,
+      point_b: null,
+      distance_px: null,
+      quality: 1,
+      target_family: "balloon_envelope",
+      detector: "balloon_envelope_detector:v1",
+      diagnostics: {
+        rejected_candidate_point_a: { x: 60, y: 110, coordinate_space: "acquisition" },
+        rejected_candidate_point_b: { x: 160, y: 110, coordinate_space: "acquisition" },
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={invalidDetection}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+      />,
+    );
+
+    expect(markup).toContain("rejected-debug-point");
+    expect(markup).toContain("REJECTED DEBUG");
+    expect(markup).not.toContain("measurement-line");
+    expect(markup).not.toContain("point point-a");
+    expect(markup).not.toContain("point point-b");
+  });
+
+  it("renders selected wire intervals as overlay diagnostics without computing A/B", () => {
+    const wireDetection: SetupDetectResponse = {
+      status: "ok",
+      valid: true,
+      point_a: { x: 70, y: 110, coordinate_space: "acquisition" },
+      point_b: { x: 150, y: 110, coordinate_space: "acquisition" },
+      distance_px: 80,
+      quality: 0.9,
+      target_family: "wire_strip",
+      detector: "wire_strip_detector:v1",
+      diagnostics: {
+        selected_valid_intervals: [
+          { start_local_x: -40, end_local_x: -34, width_px: 6, line_y: 0 },
+          { start_local_x: 34, end_local_x: 40, width_px: 6, line_y: 0 },
+        ],
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={wireDetection}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+      />,
+    );
+
+    expect(markup).toContain("selected-interval-segment");
+    expect(markup).toContain("measurement-line");
+    expect(markup).not.toContain("REJECTED DEBUG");
+  });
 });

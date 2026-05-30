@@ -25,6 +25,20 @@ describe("StatusPanel debug diagnostics", () => {
         parallel_error_px: 0,
         chord_length_px: 98,
         object_interval_count: 1,
+        formal_point_a_source_interval: { start_local_x: -49, end_local_x: -41, width_px: 8 },
+        formal_point_b_source_interval: { start_local_x: 41, end_local_x: 49, width_px: 8 },
+        point_a_on_foreground_boundary: true,
+        point_b_on_foreground_boundary: true,
+        point_a_source_layer: "bridged_foreground",
+        point_b_source_layer: "bridged_foreground",
+        internal_gap_count: 2,
+        max_internal_gap_px: 22,
+        mesh_outer_span_px: 98,
+        bundle_outer_span_px: 98,
+        formal_ab_span_px: 98,
+        virtual_envelope_span_px: 120,
+        candidate_line_is_debug_only: false,
+        selected_line_reason: "max_formal_ab_span",
       },
     };
 
@@ -36,6 +50,20 @@ describe("StatusPanel debug diagnostics", () => {
     expect(markup).toContain("-49, 0");
     expect(markup).toContain("B local x,y");
     expect(markup).toContain("49, 0");
+    expect(markup).toContain("A source interval");
+    expect(markup).toContain("B source interval");
+    expect(markup).toContain("A on foreground boundary");
+    expect(markup).toContain("B on foreground boundary");
+    expect(markup).toContain("A source layer");
+    expect(markup).toContain("B source layer");
+    expect(markup).toContain("Internal gaps");
+    expect(markup).toContain("Max internal gap");
+    expect(markup).toContain("Bundle outer span");
+    expect(markup).toContain("Formal A/B span");
+    expect(markup).toContain("Selected line reason");
+    expect(markup).toContain("Virtual envelope span");
+    expect(markup).toContain("Candidate line debug-only");
+    expect(markup).toContain("bridged_foreground");
     expect(markup).not.toContain("rejected/debug");
   });
 

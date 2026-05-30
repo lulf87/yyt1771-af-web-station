@@ -83,6 +83,28 @@ def _two_object_frame(roi: RotatedRoi) -> np.ndarray:
     )
 
 
+def _open_mesh_frame(roi: RotatedRoi) -> np.ndarray:
+    mesh_intervals = [(-56.0, -48.0), (-24.0, -16.0), (8.0, 16.0), (44.0, 56.0)]
+    return _foreground_from_local_predicate(
+        roi,
+        predicate=lambda local_x, local_y: (
+            np.logical_or.reduce(
+                [(local_x >= start) & (local_x <= end) for start, end in mesh_intervals]
+            )
+            & (np.abs(local_y) <= 8.0)
+        ),
+    )
+
+
+def _open_mesh_with_right_debug_only_fill_frame(roi: RotatedRoi) -> np.ndarray:
+    return _foreground_from_local_predicate(
+        roi,
+        predicate=lambda local_x, local_y: (
+            ((local_x >= -54.0) & (local_x <= -24.0)) & (np.abs(local_y) <= 18.0)
+        ),
+    )
+
+
 def _segmentation() -> SegmentationParams:
     return SegmentationParams(
         polarity="dark_on_light",
@@ -156,11 +178,95 @@ def test_balloon_does_not_use_projection_extrema_as_formal_ab() -> None:
     assert result.diagnostics.local_y_delta_px <= 1.0
 
 
+def test_open_mesh_mesh_outer_span_uses_outer_boundaries_of_valid_mesh_intervals() -> None:
+    roi = RotatedRoi(center_x=130.0, center_y=110.0, width=160.0, height=80.0, angle_deg=0.0)
+    result = BalloonEnvelopeDetector().detect(
+        frame=_open_mesh_frame(roi),
+        roi=roi,
+        segmentation=_segmentation(),
+        params=BalloonEnvelopeDetectorParams(envelope_mode="open_mesh", boundary_margin_px=4.0),
+    )
+
+    assert result.status is DetectionStatus.OK
+    assert result.point_a is not None
+    assert result.point_b is not None
+    _assert_same_local_measurement_line(roi, result.point_a, result.point_b, result.diagnostics)
+    a_local = _acquisition_to_local(roi, result.point_a)
+    b_local = _acquisition_to_local(roi, result.point_b)
+    assert a_local[0] == pytest.approx(-56.0, abs=1.0)
+    assert b_local[0] == pytest.approx(56.0, abs=1.0)
+    assert result.diagnostics.detected_pattern == "mesh_outer_span"
+    assert result.diagnostics.object_interval_count == 4
+    assert result.diagnostics.selected_valid_intervals is not None
+    assert len(result.diagnostics.selected_valid_intervals) == 4
+    assert result.diagnostics.leftmost_valid_interval is not None
+    assert result.diagnostics.rightmost_valid_interval is not None
+    assert result.diagnostics.formal_point_a_source_interval is not None
+    assert result.diagnostics.formal_point_b_source_interval is not None
+    assert result.diagnostics.point_a_on_foreground_boundary is True
+    assert result.diagnostics.point_b_on_foreground_boundary is True
+    assert result.diagnostics.point_a_source_layer == "bridged_foreground"
+    assert result.diagnostics.point_b_source_layer == "bridged_foreground"
+    assert result.diagnostics.internal_gap_count == 3
+    assert result.diagnostics.max_internal_gap_px is not None
+    assert result.diagnostics.max_internal_gap_px > 20.0
+    assert result.diagnostics.mesh_outer_span_px == pytest.approx(
+        result.diagnostics.formal_ab_span_px
+    )
+    assert result.diagnostics.virtual_envelope_span_px is not None
+    assert result.diagnostics.point_a_source_layer != "filled_envelope"
+    assert result.diagnostics.point_b_source_layer != "filled_envelope"
+    assert result.diagnostics.candidate_line_is_debug_only is False
+
+
+def test_open_mesh_does_not_use_filled_envelope_as_formal_contact_source() -> None:
+    roi = RotatedRoi(center_x=130.0, center_y=110.0, width=160.0, height=80.0, angle_deg=0.0)
+    result = BalloonEnvelopeDetector().detect(
+        frame=_open_mesh_frame(roi),
+        roi=roi,
+        segmentation=_segmentation(),
+        params=BalloonEnvelopeDetectorParams(
+            envelope_mode="open_mesh",
+            contact_source="filled_envelope",
+            boundary_margin_px=4.0,
+        ),
+    )
+
+    assert result.valid is False
+    assert result.point_a is None
+    assert result.point_b is None
+    assert result.distance_px is None
+    assert result.diagnostics.envelope_mode == "open_mesh"
+    assert result.diagnostics.contact_source_used == "filled_envelope"
+    assert result.diagnostics.point_a_source_layer != "filled_envelope"
+    assert result.diagnostics.point_b_source_layer != "filled_envelope"
+    assert result.diagnostics.candidate_line_is_debug_only is True
+
+
+def test_open_mesh_rejects_when_outer_span_right_edge_exists_only_in_debug_envelope() -> None:
+    roi = RotatedRoi(center_x=130.0, center_y=110.0, width=160.0, height=80.0, angle_deg=0.0)
+    result = BalloonEnvelopeDetector().detect(
+        frame=_open_mesh_with_right_debug_only_fill_frame(roi),
+        roi=roi,
+        segmentation=_segmentation(),
+        params=BalloonEnvelopeDetectorParams(envelope_mode="open_mesh", boundary_margin_px=4.0),
+    )
+
+    assert result.valid is False
+    assert result.point_a is None
+    assert result.point_b is None
+    assert result.distance_px is None
+    assert result.diagnostics.rejected_candidate_point_a is not None
+    assert result.diagnostics.rejected_candidate_point_b is not None
+    assert result.diagnostics.point_b_on_foreground_boundary is not True
+    assert result.diagnostics.candidate_line_is_debug_only is True
+
+
 @pytest.mark.parametrize("angle_deg", [0.0, 90.0, 30.0])
-def test_wire_strip_outer_to_outer_uses_two_intervals_on_same_line(angle_deg: float) -> None:
+def test_wire_strip_bundle_envelope_uses_bundle_outer_span_on_same_line(angle_deg: float) -> None:
     roi = RotatedRoi(center_x=130.0, center_y=110.0, width=140.0, height=80.0, angle_deg=angle_deg)
     result = WireStripDetector().detect(
-        frame=_two_object_frame(roi),
+        frame=_open_mesh_frame(roi),
         roi=roi,
         segmentation=_segmentation(),
         params=WireStripDetectorParams(boundary_margin_px=3.0),
@@ -170,15 +276,19 @@ def test_wire_strip_outer_to_outer_uses_two_intervals_on_same_line(angle_deg: fl
     assert result.point_a is not None
     assert result.point_b is not None
     _assert_same_local_measurement_line(roi, result.point_a, result.point_b, result.diagnostics)
-    assert result.diagnostics.pattern_model == "blank_object_blank_object_blank"
-    assert result.diagnostics.detected_pattern == "blank_object_blank_object_blank"
-    assert result.diagnostics.object_interval_count == 2
-    assert result.diagnostics.measurement_mode == "outer_to_outer"
-    assert result.diagnostics.selected_intervals is not None
-    assert len(result.diagnostics.selected_intervals) == 2
+    assert result.diagnostics.pattern_model == "blank_wire_bundle_envelope_blank"
+    assert result.diagnostics.detected_pattern == "wire_bundle_envelope"
+    assert result.diagnostics.object_interval_count == 4
+    assert result.diagnostics.interval_count == 4
+    assert result.diagnostics.measurement_mode == "wire_bundle_envelope"
+    assert result.diagnostics.selected_valid_intervals is not None
+    assert len(result.diagnostics.selected_valid_intervals) == 4
+    assert result.diagnostics.bundle_outer_span_px == pytest.approx(
+        result.diagnostics.formal_ab_span_px
+    )
 
 
-def test_wire_strip_rejects_single_object_pattern() -> None:
+def test_wire_strip_rejects_single_interval_as_insufficient_bundle_support() -> None:
     roi = RotatedRoi(center_x=130.0, center_y=110.0, width=140.0, height=80.0, angle_deg=0.0)
     result = WireStripDetector().detect(
         frame=_single_object_frame(roi),
@@ -191,5 +301,5 @@ def test_wire_strip_rejects_single_object_pattern() -> None:
     assert result.point_a is None
     assert result.point_b is None
     assert result.distance_px is None
-    assert result.diagnostics.pattern_model == "blank_object_blank_object_blank"
-    assert result.diagnostics.detected_pattern != "blank_object_blank_object_blank"
+    assert result.diagnostics.pattern_model == "blank_wire_bundle_envelope_blank"
+    assert result.diagnostics.detected_pattern != "wire_bundle_envelope"

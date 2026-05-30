@@ -132,7 +132,7 @@ Use real camera adapter and local configuration. Must be optional.
 
 The first implementation must work without any camera SDK.
 
-Real camera support comes later behind:
+Real camera support must stay behind:
 
 ```python
 class CameraSource:
@@ -141,7 +141,8 @@ class CameraSource:
     def get_latest_frame(self) -> Frame: ...
 ```
 
-The Hik adapter must be lazy-loaded only when selected by profile.
+The Hik adapter must be lazy-loaded only when selected by profile. Mock and
+offline modes must continue to run when the Hik SDK is absent.
 
 ## Storage strategy
 

@@ -99,7 +99,7 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
     setCameraStatus(await getCameraStatus());
   }
 
-  async function openSource(profile: "dev_mock" | "dev_offline") {
+  async function openSource(profile: "dev_mock" | "dev_offline" | "dev_lab") {
     await runAction(`open-${profile}`, async () => {
       await openCamera(profile);
       await refreshStatus();
@@ -115,6 +115,10 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
 
   async function handleOpenOffline() {
     await openSource("dev_offline");
+  }
+
+  async function handleOpenLab() {
+    await openSource("dev_lab");
   }
 
   async function handleFreeze() {
@@ -256,13 +260,19 @@ export function SetupPage({ onMeasurementDefinitionConfirmed }: SetupPageProps) 
         <aside className="setup-panel" aria-label="Setup controls">
           <section className="panel-section">
             <h2>Source</h2>
-            <p className="panel-note">Static mock is only a smoke test; offline source uses local .npy frames.</p>
+            <p className="panel-note">
+              Static mock is only a smoke test; offline source uses local .npy frames; lab source
+              uses the optional Hik MVS adapter.
+            </p>
             <div className="button-row compact">
               <button disabled={isBusy} onClick={handleOpenMock} type="button">
                 Open mock source
               </button>
               <button disabled={isBusy} onClick={handleOpenOffline} type="button">
                 Open offline source
+              </button>
+              <button disabled={isBusy} onClick={handleOpenLab} type="button">
+                Open lab source
               </button>
               <button disabled={!hasOpenSource || isBusy} onClick={handleFreeze} type="button">
                 Freeze latest frame

@@ -73,5 +73,7 @@ describe("SegmentationControls", () => {
     expect(markup).toContain("open_mesh");
     expect(markup).toContain("Contact source");
     expect(markup).toContain("bridged_foreground");
+    expect(markup).toContain("filled_envelope (debug-only)");
+    expect(markup).toContain('disabled="" value="filled_envelope"');
   });
 });

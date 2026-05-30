@@ -83,6 +83,18 @@ class BalloonEnvelopeDetector:
             contact_source_used=contact_source_used,
             actual_contact_source_area_ratio=actual_contact_source_area_ratio,
         )
+        if params.envelope_mode == "open_mesh" and contact_source_used == "filled_envelope":
+            return self._failure(
+                DetectionStatus.SEGMENTATION_FAILED,
+                quality=contrast_quality,
+                message="open_mesh formal A/B cannot use filled_envelope debug layer.",
+                diagnostics_extra=layer_diagnostics
+                | {
+                    "candidate_line_is_debug_only": True,
+                    "point_a_source_layer": None,
+                    "point_b_source_layer": None,
+                },
+            )
         if not np.any(foreground):
             return self._failure(
                 DetectionStatus.LOW_CONTRAST,
@@ -97,7 +109,11 @@ class BalloonEnvelopeDetector:
                 quality=contrast_quality,
                 diagnostics_extra=layer_diagnostics | {"candidate_component_count": 0},
             )
-        if len(components) > 1 and components[1].area_px > components[0].area_px * 0.35:
+        if (
+            params.envelope_mode != "open_mesh"
+            and len(components) > 1
+            and components[1].area_px > components[0].area_px * 0.35
+        ):
             return self._failure(
                 DetectionStatus.MULTIPLE_TARGETS,
                 quality=contrast_quality,
@@ -112,12 +128,27 @@ class BalloonEnvelopeDetector:
             )
 
         component = components[0]
+        if params.envelope_mode == "open_mesh":
+            component_mask = np.zeros_like(foreground, dtype=bool)
+            component_coordinates = []
+            for mesh_component in components:
+                component_mask |= mesh_component.mask
+                component_coordinates.append(mesh_component.coordinates_yx)
+            component = type(component)(
+                mask=component_mask,
+                coordinates_yx=np.vstack(component_coordinates),
+            )
         selection = select_roi_local_chord_contacts_debug(
             component.mask,
             roi,
             pattern_model=params.measurement_model,
             boundary_margin_px=params.boundary_margin_px,
             reject_contact_on_roi_boundary=params.reject_contact_on_roi_boundary,
+            allow_mesh_outer_span=params.envelope_mode == "open_mesh",
+            source_layer=contact_source_used,
+            raw_foreground_mask=segmentation_layers.raw_foreground,
+            bridged_foreground_mask=segmentation_layers.morphology_foreground,
+            filled_envelope_mask=filled_envelope,
         )
         component_diagnostics = (
             layer_diagnostics
@@ -172,6 +203,23 @@ class BalloonEnvelopeDetector:
                 "detected_pattern": selection.detected_pattern,
                 "object_interval_count": selection.object_interval_count,
                 "selected_intervals": selection.selected_intervals,
+                "raw_intervals": selection.raw_intervals,
+                "bridged_intervals": selection.bridged_intervals,
+                "selected_valid_intervals": selection.selected_valid_intervals,
+                "leftmost_valid_interval": selection.leftmost_valid_interval,
+                "rightmost_valid_interval": selection.rightmost_valid_interval,
+                "formal_point_a_source_interval": selection.formal_point_a_source_interval,
+                "formal_point_b_source_interval": selection.formal_point_b_source_interval,
+                "point_a_on_foreground_boundary": selection.point_a_on_foreground_boundary,
+                "point_b_on_foreground_boundary": selection.point_b_on_foreground_boundary,
+                "point_a_source_layer": selection.point_a_source_layer,
+                "point_b_source_layer": selection.point_b_source_layer,
+                "internal_gap_count": selection.internal_gap_count,
+                "max_internal_gap_px": selection.max_internal_gap_px,
+                "mesh_outer_span_px": selection.mesh_outer_span_px,
+                "formal_ab_span_px": selection.formal_ab_span_px,
+                "virtual_envelope_span_px": selection.virtual_envelope_span_px,
+                "candidate_line_is_debug_only": selection.candidate_line_is_debug_only,
             }
         )
         return result
@@ -269,6 +317,23 @@ def _contact_diagnostics(contact_debug: object) -> dict[str, object]:
         "detected_pattern": contact_debug.detected_pattern,
         "object_interval_count": contact_debug.object_interval_count,
         "selected_intervals": contact_debug.selected_intervals,
+        "raw_intervals": contact_debug.raw_intervals,
+        "bridged_intervals": contact_debug.bridged_intervals,
+        "selected_valid_intervals": contact_debug.selected_valid_intervals,
+        "leftmost_valid_interval": contact_debug.leftmost_valid_interval,
+        "rightmost_valid_interval": contact_debug.rightmost_valid_interval,
+        "formal_point_a_source_interval": contact_debug.formal_point_a_source_interval,
+        "formal_point_b_source_interval": contact_debug.formal_point_b_source_interval,
+        "point_a_on_foreground_boundary": contact_debug.point_a_on_foreground_boundary,
+        "point_b_on_foreground_boundary": contact_debug.point_b_on_foreground_boundary,
+        "point_a_source_layer": contact_debug.point_a_source_layer,
+        "point_b_source_layer": contact_debug.point_b_source_layer,
+        "internal_gap_count": contact_debug.internal_gap_count,
+        "max_internal_gap_px": contact_debug.max_internal_gap_px,
+        "mesh_outer_span_px": contact_debug.mesh_outer_span_px,
+        "formal_ab_span_px": contact_debug.formal_ab_span_px,
+        "virtual_envelope_span_px": contact_debug.virtual_envelope_span_px,
+        "candidate_line_is_debug_only": contact_debug.candidate_line_is_debug_only,
         "measurement_mode": contact_debug.measurement_mode,
     }
 

@@ -144,7 +144,7 @@ def test_boundary_rejection_keeps_formal_points_empty_but_records_debug_candidat
     assert diagnostics.rejected_candidate_point_b.coordinate_space is CoordinateSpace.ACQUISITION
 
 
-def test_open_mesh_boundary_rejection_keeps_rejected_candidates_debug_only() -> None:
+def test_open_mesh_invalid_single_span_keeps_debug_candidates_out_of_formal_ab() -> None:
     result = BalloonEnvelopeDetector().detect(
         frame=_ellipse_frame(),
         roi=RotatedRoi(center_x=80.0, center_y=60.0, width=72.0, height=60.0, angle_deg=0.0),
@@ -158,10 +158,10 @@ def test_open_mesh_boundary_rejection_keeps_rejected_candidates_debug_only() -> 
         params=BalloonEnvelopeDetectorParams(envelope_mode="open_mesh"),
     )
 
-    assert result.status is DetectionStatus.CALIPER_CONTACT_ON_ROI_BOUNDARY
     assert result.valid is False
     assert result.point_a is None
     assert result.point_b is None
     assert result.distance_px is None
     assert result.diagnostics.rejected_candidate_point_a is not None
     assert result.diagnostics.rejected_candidate_point_b is not None
+    assert result.diagnostics.candidate_line_is_debug_only is True

@@ -92,6 +92,35 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
     ["Foreground ratio", valueText(diagnostics.foreground_area_ratio_in_roi)],
     ["Object intervals", valueText(diagnostics.object_interval_count)],
     ["Selected intervals", intervalSummary(diagnostics.selected_intervals)],
+    ["Raw intervals", intervalSummary(diagnostics.raw_intervals)],
+    ["Bridged intervals", intervalSummary(diagnostics.bridged_intervals)],
+    ["Selected valid intervals", intervalSummary(diagnostics.selected_valid_intervals)],
+    ["Leftmost valid interval", intervalSummary(singleInterval(diagnostics.leftmost_valid_interval))],
+    ["Rightmost valid interval", intervalSummary(singleInterval(diagnostics.rightmost_valid_interval))],
+    [
+      "A source interval",
+      intervalSummary(singleInterval(diagnostics.formal_point_a_source_interval)),
+    ],
+    [
+      "B source interval",
+      intervalSummary(singleInterval(diagnostics.formal_point_b_source_interval)),
+    ],
+    ["A on foreground boundary", valueText(diagnostics.point_a_on_foreground_boundary)],
+    ["B on foreground boundary", valueText(diagnostics.point_b_on_foreground_boundary)],
+    ["A source layer", valueText(diagnostics.point_a_source_layer)],
+    ["B source layer", valueText(diagnostics.point_b_source_layer)],
+    ["Internal gaps", valueText(diagnostics.internal_gap_count)],
+    ["Max internal gap", valueText(diagnostics.max_internal_gap_px)],
+    ["Bundle outer span", valueText(diagnostics.bundle_outer_span_px ?? diagnostics.mesh_outer_span_px)],
+    ["Formal A/B span", valueText(diagnostics.formal_ab_span_px)],
+    ["Virtual envelope span", valueText(diagnostics.virtual_envelope_span_px)],
+    ["Candidate line debug-only", valueText(diagnostics.candidate_line_is_debug_only)],
+    ["Selected line reason", valueText(diagnostics.selected_line_reason)],
+    ["Previous line y", valueText(diagnostics.previous_measurement_line_y)],
+    ["Line y jump", valueText(diagnostics.line_y_delta_from_previous)],
+    ["Distance jump", valueText(diagnostics.distance_jump_from_previous)],
+    ["Point A jump", valueText(diagnostics.point_a_jump_from_previous)],
+    ["Point B jump", valueText(diagnostics.point_b_jump_from_previous)],
     ["Component area", valueText(diagnostics.selected_component_area_px)],
     ["Component bbox", bboxText(diagnostics.selected_component_bbox)],
     ["Component count", valueText(diagnostics.candidate_component_count)],
@@ -168,6 +197,10 @@ function pointLike(value: unknown, suffix?: string): string {
     return suffix ? `${coordinate} ${suffix}` : coordinate;
   }
   return "N/A";
+}
+
+function singleInterval(value: unknown): unknown[] | null {
+  return value ? [value] : null;
 }
 
 function intervalSummary(value: unknown): string {

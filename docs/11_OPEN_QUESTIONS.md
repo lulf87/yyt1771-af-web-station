@@ -6,8 +6,8 @@ These are intentionally not blockers for the first scaffold. Codex should use th
 
 Default assumption:
 
-- Real camera integration is delayed.
-- Use camera interface plus mock/offline sources first.
+- Use the Hik MVS adapter behind the camera interface for lab mode.
+- Mock/offline sources remain the default non-hardware development paths.
 
 Open:
 

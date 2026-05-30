@@ -305,7 +305,19 @@ def _build_debug_artifact(
         else:
             foreground = layers.morphology_foreground
         components = connected_components(foreground, segmentation.min_component_area_px)
-        selected_component_mask = components[0].mask if components else None
+        if (
+            (
+                target_family is TargetFamily.BALLOON_ENVELOPE
+                and isinstance(detector_params, BalloonEnvelopeDetectorParams)
+                and detector_params.envelope_mode == "open_mesh"
+            )
+            or target_family is TargetFamily.WIRE_STRIP
+        ) and components:
+            selected_component_mask = np.zeros_like(foreground, dtype=bool)
+            for component in components:
+                selected_component_mask |= component.mask
+        else:
+            selected_component_mask = components[0].mask if components else None
         selected_contour_mask = (
             contour_mask(selected_component_mask) if selected_component_mask is not None else None
         )

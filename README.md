@@ -2,22 +2,25 @@
 
 Browser UI plus Python backend for supporting YY/T 1771-style AF visual measurement workflows.
 
-The current version runs without real camera hardware. It supports static mock frames, real offline `.npy`/PGM frame folders, contour-based A/B detection for the two public detector families, GUI ROI editing, setup/run/playback/analysis/export flows, temperature mock support, and an Offline Real-Capture Validation workflow for checking real captured frame folders before Hik MVS integration.
+The current version runs without real camera hardware. It supports static mock frames, real offline `.npy`/PGM frame folders, an optional Hik MVS GigE lab camera source, contour-based A/B detection for the two public detector families, GUI ROI editing, setup/run/playback/analysis/export flows, temperature mock support, and an Offline Real-Capture Validation workflow for checking real captured frame folders.
 
 ## Current Scope
 
 - FastAPI backend under `backend/src/yyt1771_af`.
-- Vite React TypeScript frontend with setup, run, offline playback, and analysis pages.
-- GUI source selection for both `dev_mock` and `dev_offline`.
+- Vite React TypeScript frontend with setup, batch run, live offline run, offline playback, and analysis pages.
+- GUI source selection for `dev_mock`, `dev_offline`, and optional `dev_lab`.
 - Two public detector implementations only:
   - `BalloonEnvelopeDetector`
   - `WireStripDetector`
 - Formal ROI, A/B points, and `distance_px` stored in `acquisition` coordinates.
 - Static `320 x 220` mock camera source for deterministic smoke tests and automated tests.
 - Offline camera source for lazy streaming of `.npy` and PGM frame folders.
+- Optional Hik MVS GigE camera source behind a lazy-loaded SDK adapter.
 - Downsampled PNG frame preview APIs for high-resolution offline frames.
 - Setup page ROI editing by mouse drag/move/resize plus numeric fields.
 - Result panels show backend A/B coordinates, distance, quality, status, reason, detector, and coordinate space.
+- Batch Run keeps the confirmed ROI/recipe, samples a finite frame count, stores run artifacts, and feeds analysis/export.
+- Live Offline Run simulates a live camera from local offline frames, lazy-loads one frame at a time, and refreshes frame preview, ROI, backend A/B, distance, status, quality, and diagnostics in the browser.
 - Run page latest-frame overlay for ROI and backend-returned A/B points.
 - Offline Playback page for replaying real offline frames and validation samples with slider, play/pause, failures-only stepping, and top-jump navigation.
 - Offline Real-Capture Validation service and CLI.
@@ -26,13 +29,13 @@ The current version runs without real camera hardware. It supports static mock f
 - Template ROI/config files under `configs/validation/` and `configs/local/`.
 - JSON, CSV, PNG, and XLSX run export paths with local path redaction.
 - Temperature controller abstraction with mock/file/serial-placeholder paths.
-- Hik MVS real camera adapter is still intentionally deferred and not implemented.
 
 ## Requirements
 
 - Python 3.11 or newer.
 - Node.js 20 or newer is recommended for Vite 7.
 - No camera SDK is required for mock/offline/validation workflows.
+- Hik MVS lab mode requires the vendor Python SDK to be installed or configured locally.
 
 ## Backend Setup
 
@@ -89,6 +92,8 @@ npm --prefix frontend run dev
 
 In the Setup page, use `Open mock source` for the static smoke-test frame or `Open offline source` for a configured local offline frame folder. Drag on the frame to create a ROI, drag inside it to move it, drag handles to resize it, and use the numeric fields for precise acquisition-coordinate values.
 
+Use `Open lab source` for a real Hik MVS camera connected on LAN/GigE. Mock and offline modes still work when the Hik SDK is absent.
+
 Build and check the frontend:
 
 ```bash
@@ -96,6 +101,29 @@ npm --prefix frontend run test
 npm --prefix frontend run lint
 npm --prefix frontend run build
 ```
+
+## Hik MVS Lab Camera
+
+The committed lab profile is `configs/profiles/dev_lab.example.yaml`. Machine-specific SDK paths, serial numbers, and device IP addresses should go in ignored local config files under `configs/local/` or environment variables.
+
+Useful environment variables:
+
+```bash
+export YYT1771_AF_HIK_MVS_MODULE="MvCameraControl_class"
+export YYT1771_AF_HIK_MVS_SDK_PATH="/path/to/vendor/python/sdk"
+export YYT1771_AF_HIK_MVS_DEVICE_IP="192.168.1.64"
+export YYT1771_AF_HIK_MVS_SERIAL="REPLACE_WITH_REAL_SERIAL"
+```
+
+Open the lab camera through the API:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/camera/open \
+  -H "Content-Type: application/json" \
+  -d '{"profile":"dev_lab"}'
+```
+
+If no `serial_number` or `device_ip` selector is configured, the adapter opens the first discovered GigE camera. The adapter currently converts `Mono8` frames into acquisition-coordinate grayscale frames for the existing preview, setup, and run flows.
 
 ## Offline Real-Capture Validation
 
@@ -193,6 +221,25 @@ Useful GUI checks:
 - Playback: play continuous offline frames, jump to `top_jump_frames`, and isolate failure frames.
 
 See `docs/15_GUI_OFFLINE_PLAYBACK_AND_ROI_UX.md` for the detailed workflow.
+
+## Live Offline Run
+
+Live Offline Run is available from the Run page after confirming setup. It is separate from Batch Run.
+
+1. Set the local frame folder:
+
+```bash
+export YYT1771_AF_OFFLINE_DIR="/absolute/path/to/local/frames"
+```
+
+2. In Setup, open offline source, freeze a frame, draw ROI, tune recipe, and confirm setup.
+3. In Run, select `Live Offline Run`.
+4. Click `Open Live Source`.
+5. Use `Play`, `Pause`, `Step Prev`, `Step Next`, and `Seek`.
+
+The backend keeps the confirmed `MeasurementDefinition` snapshot locked for the session. Every frame is loaded lazily and detected with the same ROI and recipe. The frontend displays returned acquisition-coordinate A/B points and rejected/debug candidates, but does not calculate formal A/B.
+
+See `docs/18_LIVE_OFFLINE_RUN.md` for the detailed workflow and API.
 
 ## Configs
 

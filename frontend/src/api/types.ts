@@ -135,8 +135,8 @@ export interface BalloonEnvelopeDetectorParams {
 
 export interface WireStripDetectorParams {
   detector_kind: "wire_strip_detector";
-  measurement_model: "blank_object_blank_object_blank";
-  measurement_mode: "outer_to_outer";
+  measurement_model: "blank_wire_bundle_envelope_blank";
+  measurement_mode: "wire_bundle_envelope";
   min_quality: number;
   max_point_jump_px: number | null;
   reject_contact_on_roi_boundary: boolean;
@@ -208,7 +208,7 @@ export interface RunStartResponse {
 
 export interface RunStatusResponse {
   run_id: string;
-  status: "running" | "stopped";
+  status: "running" | "completed" | "stopped";
   sample_hz: number;
   sample_count: number;
   measurement_definition_id: string;
@@ -297,6 +297,63 @@ export interface OfflinePlaybackStatus {
   top_jump_frames: number[];
   failure_frame_indices: number[];
   current: OfflinePlaybackFrame | null;
+}
+
+export interface OfflineRunOpenRequest {
+  measurement_definition_id: string;
+  frames_dir?: string | null;
+  fps: number;
+  loop: boolean;
+  dataset_label?: string | null;
+  start_frame_index?: number;
+  max_preview_width?: number;
+}
+
+export interface OfflineRunOpenResponse {
+  session_id: string;
+  opened: boolean;
+  dataset_label: string;
+  frame_count: number;
+  current_frame_index: number;
+  fps: number;
+  loop: boolean;
+  measurement_definition_id: string;
+}
+
+export interface OfflineRunStatus {
+  session_id: string;
+  opened: boolean;
+  state: "opened" | "playing" | "paused" | "end_of_stream" | "closed" | "error" | string;
+  dataset_label: string;
+  frame_count: number;
+  current_frame_index: number;
+  fps: number;
+  loop: boolean;
+  measurement_definition_id: string;
+  latest: OfflineRunFrame | null;
+}
+
+export interface OfflineRunFrame {
+  session_id: string;
+  frame_index: number;
+  frame_name: string;
+  relative_time_s: number;
+  acquisition_width: number;
+  acquisition_height: number;
+  display_width: number;
+  display_height: number;
+  scale_x: number;
+  scale_y: number;
+  coordinate_space: CoordinateSpace;
+  preview_url: string;
+  end_of_stream: boolean;
+  detection: SetupDetectResponse;
+  runtime: Record<string, unknown>;
+}
+
+export interface OfflineRunCloseResponse {
+  session_id: string;
+  closed: boolean;
 }
 
 export interface RunSummary {

@@ -4,7 +4,12 @@ mode: development
 camera:
   type: hik_mvs
   # Machine-specific values belong in configs/local/*.yaml, not in committed files.
+  # If neither serial_number nor device_ip is set, the adapter opens the first
+  # discovered GigE camera on the LAN.
+  transport_layer: gige
+  sdk_module: null
   serial_number: "REPLACE_WITH_CAMERA_SERIAL"
+  device_ip: null
   sdk_path: null
   pixel_format: mono8
   frame_width: 2048
@@ -12,6 +17,7 @@ camera:
   frame_rate_hz: 10
   exposure_us: null
   gain: null
+  grab_timeout_ms: 1000
   device_roi:
     x: 0
     y: 0

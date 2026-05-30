@@ -122,7 +122,7 @@ def test_run_start_persists_metadata_definition_and_samples(
     metadata = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["run_id"] == run_id
     assert metadata["sample_hz"] == 10.0
-    assert metadata["status"] == "running"
+    assert metadata["status"] == "completed"
     assert metadata["temperature_source"]["source_type"] == "mock"
 
     sample_lines = (run_dir / "samples.jsonl").read_text(encoding="utf-8").splitlines()

@@ -224,8 +224,10 @@ def test_setup_detect_returns_backend_ab_points_for_wire_recipe() -> None:
     assert payload["point_a"]["coordinate_space"] == "acquisition"
     assert payload["point_b"]["coordinate_space"] == "acquisition"
     assert 40.0 <= payload["distance_px"] <= 50.0
-    assert payload["diagnostics"]["measurement_mode"] == "outer_to_outer"
-    assert payload["diagnostics"]["object_interval_count"] == 2
+    assert payload["diagnostics"]["measurement_mode"] == "wire_bundle_envelope"
+    assert payload["diagnostics"]["detected_pattern"] == "wire_bundle_envelope"
+    assert payload["diagnostics"]["object_interval_count"] >= 2
+    assert payload["diagnostics"]["interval_count"] >= 2
 
 
 def test_offline_camera_open_reads_pgm_image_folder(

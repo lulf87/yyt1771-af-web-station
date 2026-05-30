@@ -80,7 +80,7 @@ For each candidate measurement line:
 - select A/B from the required interval boundaries;
 - reject the frame if the line contact is caused by ROI cropping or the pattern is not trustworthy.
 
-The selected A/B points should be stable over time. If several measurement lines or interval patterns are equally plausible, return `caliper_contact_ambiguous` unless temporal tracking can resolve the choice safely.
+The selected A/B points should be stable over time. For `wire_strip`, the formal selected line is the current frame's valid line with the largest `formal_ab_span_px`; previous-frame line position must not affect that formal selection in this stage.
 
 ## ROI requirement
 
@@ -117,6 +117,20 @@ The formal pattern is blank - object - blank.
 A/B are the left and right real contour/scanline boundary contacts of the object/envelope on the same ROI-local measurement line.
 ```
 
+For `envelope_mode = open_mesh`, a single ROI-local measurement line may contain multiple valid mesh foreground intervals:
+
+```text
+blank | interval_1 | gap | interval_2 | gap | interval_3 | blank
+```
+
+These intervals may be interpreted as one effective mesh envelope object, but the formal A/B points must still come from real foreground interval boundaries:
+
+- A is the left outer boundary of the leftmost valid interval on the selected contact source.
+- B is the right outer boundary of the rightmost valid interval on the selected contact source.
+- Internal gaps are mesh voids; they may be inside the measured span but can never be A or B.
+- `mesh_outer_span` is not a virtual envelope boundary, not a ROI-edge span, and not a filled-envelope background edge.
+- For `open_mesh`, `filled_envelope` is a debug layer only unless a later contract explicitly allows it; the default formal contact source is `bridged_foreground`.
+
 Expected preprocessing:
 
 - bridge small mesh gaps
@@ -152,18 +166,24 @@ wire_strip
 Definition:
 
 ```text
-A wire/strip target is a visible thin or elongated object inside the ROI. The detector measures the visible contour within the ROI, not the physical endpoints of the full object.
+A wire/strip target is a visible wire bundle inside the ROI. The detector measures the bundle envelope width inside the ROI, not the physical endpoints of the full object.
 ```
 
 A/B rule:
 
 ```text
-The formal pattern is blank - object - blank - object - blank.
+The formal pattern is blank - wire_bundle_envelope - blank.
 
-The default measurement mode is outer-to-outer.
+The only current formal measurement mode is wire_bundle_envelope.
 
-A is the left outer contour/scanline boundary of the first object interval on the selected ROI-local measurement line.
-B is the right outer contour/scanline boundary of the second object interval on the same ROI-local measurement line.
+On one ROI-local measurement line, the wire bundle may contain multiple valid wire foreground intervals:
+
+blank | wire_1 | gap | wire_2 | gap | wire_3 | blank
+
+These gaps are internal wire-bundle spaces, not multiple independent measurement objects.
+
+A is the left outer boundary of the leftmost valid wire interval on the selected ROI-local measurement line.
+B is the right outer boundary of the rightmost valid wire interval on the same ROI-local measurement line.
 ```
 
 Important:
@@ -171,8 +191,12 @@ Important:
 - Do not search for whole-wire physical endpoints.
 - Do not skeletonize for endpoint detection in the initial version.
 - Do not return `wire_endpoint_missing`; that status is not part of this project.
-- Do not measure the inner gap unless a future `inner_to_inner` mode is explicitly defined.
-- A line with only one object interval is invalid for `wire_strip`.
+- Do not measure an inner gap in the current project.
+- Do not implement or expose a two-strip outer-to-outer mode.
+- A/B must be on real wire foreground interval boundaries.
+- A/B must not be gap, background, ROI-boundary, virtual-envelope, or debug-candidate points.
+- A line without enough valid wire interval support is invalid for `wire_strip`.
+- Run detection must choose the current frame's valid candidate line with the largest `formal_ab_span_px`.
 
 Common failure reasons:
 
@@ -233,22 +257,15 @@ The score should consider:
 - target area plausibility
 - contact-point boundary support
 - distance from ROI boundary
-- temporal jump from previous frame if tracking context exists
+- temporal jump from previous frame for diagnostics and validation only
 
 Quality is not a substitute for status. A result can have low quality and still expose a specific failure reason.
 
 ## Temporal stability
 
-Live detection should not treat each frame as fully independent if previous valid points exist.
+For the current `wire_bundle_envelope` stage, previous-frame information is diagnostics only. It may be recorded as `previous_measurement_line_y`, `line_y_delta_from_previous`, `distance_jump_from_previous`, `point_a_jump_from_previous`, and `point_b_jump_from_previous`, but it must not change the current frame's formal A/B selection.
 
-Allowed stabilizers:
-
-- previous A/B prior
-- max jump threshold
-- candidate scoring using temporal continuity
-- smoothing for display only
-
-Raw stored `distance_px` must remain based on actual frame detection, not display-only smoothing.
+Future temporal continuity would require a separate design stage and, at most, a very weak tie-break when candidate `formal_ab_span_px` values differ by a tiny tolerance.
 
 ## Diagnostics
 
@@ -265,6 +282,7 @@ A detection result may include diagnostic data:
 - chord length
 - pattern model and detected pattern
 - selected object intervals
+- selected wire intervals and bundle outer span when `target_family = wire_strip`
 - ROI-local A/B coordinates
 - failure reason details
 

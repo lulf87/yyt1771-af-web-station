@@ -8,6 +8,11 @@ import type {
   OfflinePlaybackFrame,
   OfflinePlaybackOpenRequest,
   OfflinePlaybackStatus,
+  OfflineRunCloseResponse,
+  OfflineRunFrame,
+  OfflineRunOpenRequest,
+  OfflineRunOpenResponse,
+  OfflineRunStatus,
   RunListResponse,
   RunSamplesResponse,
   RunStartRequest,
@@ -117,6 +122,47 @@ export async function previousOfflinePlayback(
   return requestJson<OfflinePlaybackFrame>("/api/offline-playback/previous", {
     method: "POST",
     body: JSON.stringify({ failures_only: failuresOnly }),
+  });
+}
+
+export async function openOfflineRun(
+  request: OfflineRunOpenRequest,
+): Promise<OfflineRunOpenResponse> {
+  return requestJson<OfflineRunOpenResponse>("/api/offline-run/open", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function getOfflineRunStatus(sessionId: string): Promise<OfflineRunStatus> {
+  return requestJson<OfflineRunStatus>(`/api/offline-run/${sessionId}/status`);
+}
+
+export async function nextOfflineRun(sessionId: string): Promise<OfflineRunFrame> {
+  return requestJson<OfflineRunFrame>(`/api/offline-run/${sessionId}/next`, {
+    method: "POST",
+  });
+}
+
+export async function previousOfflineRun(sessionId: string): Promise<OfflineRunFrame> {
+  return requestJson<OfflineRunFrame>(`/api/offline-run/${sessionId}/previous`, {
+    method: "POST",
+  });
+}
+
+export async function seekOfflineRun(
+  sessionId: string,
+  frameIndex: number,
+): Promise<OfflineRunFrame> {
+  return requestJson<OfflineRunFrame>(`/api/offline-run/${sessionId}/seek`, {
+    method: "POST",
+    body: JSON.stringify({ frame_index: frameIndex }),
+  });
+}
+
+export async function closeOfflineRun(sessionId: string): Promise<OfflineRunCloseResponse> {
+  return requestJson<OfflineRunCloseResponse>(`/api/offline-run/${sessionId}/close`, {
+    method: "POST",
   });
 }
 

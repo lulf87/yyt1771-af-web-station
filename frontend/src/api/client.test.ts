@@ -5,7 +5,12 @@ import {
   confirmSetup,
   detectSetupFrame,
   downloadRunExport,
+  closeOfflineRun,
   getTemperatureStatus,
+  nextOfflineRun,
+  openCamera,
+  openOfflineRun,
+  seekOfflineRun,
   setTemperatureOutput,
   setTemperaturePower,
   setTemperatureTarget,
@@ -68,6 +73,24 @@ describe("setup API client", () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty("point_b");
   });
 
+  it("posts the dev_lab profile when opening the lab camera source", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ opened: true, source_type: "hik_mvs" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await openCamera("dev_lab");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/camera/open",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ profile: "dev_lab" }),
+      }),
+    );
+  });
+
   it("starts a run from a measurement definition id and fixed sample rate", async () => {
     const responsePayload = {
       run_id: "run_1",
@@ -93,6 +116,62 @@ describe("setup API client", () => {
         method: "POST",
         body: JSON.stringify(request),
       }),
+    );
+  });
+
+  it("uses session-scoped live offline run endpoints", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await openOfflineRun({
+      measurement_definition_id: "md_1",
+      frames_dir: null,
+      fps: 10,
+      loop: true,
+      dataset_label: null,
+      start_frame_index: 0,
+      max_preview_width: 1200,
+    });
+    await nextOfflineRun("offline_run_1");
+    await seekOfflineRun("offline_run_1", 12);
+    await closeOfflineRun("offline_run_1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/offline-run/open",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          measurement_definition_id: "md_1",
+          frames_dir: null,
+          fps: 10,
+          loop: true,
+          dataset_label: null,
+          start_frame_index: 0,
+          max_preview_width: 1200,
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/offline-run/offline_run_1/next",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/offline-run/offline_run_1/seek",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ frame_index: 12 }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/offline-run/offline_run_1/close",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 

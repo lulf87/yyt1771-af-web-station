@@ -122,6 +122,11 @@ function BalloonDetectorControls({
             onDetectorChange({
               ...detector,
               envelope_mode: event.currentTarget.value as BalloonEnvelopeDetectorParams["envelope_mode"],
+              contact_source:
+                event.currentTarget.value === "open_mesh" &&
+                detector.contact_source === "filled_envelope"
+                  ? "bridged_foreground"
+                  : detector.contact_source,
             })
           }
           value={detector.envelope_mode}
@@ -143,7 +148,11 @@ function BalloonDetectorControls({
         >
           <option value="raw_foreground">raw_foreground</option>
           <option value="bridged_foreground">bridged_foreground</option>
-          <option value="filled_envelope">filled_envelope</option>
+          <option disabled={detector.envelope_mode === "open_mesh"} value="filled_envelope">
+            {detector.envelope_mode === "open_mesh"
+              ? "filled_envelope (debug-only)"
+              : "filled_envelope"}
+          </option>
         </select>
       </label>
     </>

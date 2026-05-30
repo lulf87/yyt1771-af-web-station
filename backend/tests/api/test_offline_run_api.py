@@ -1,0 +1,196 @@
+from __future__ import annotations
+
+import json
+import struct
+from pathlib import Path
+
+import numpy as np
+from fastapi.testclient import TestClient
+from yyt1771_af.main import app
+
+
+def _write_frame(path: Path, *, x_offset: int = 0, value: int = 30) -> None:
+    image = np.full((220, 320), 230, dtype=np.uint8)
+    image[78:142, 58 + x_offset : 164 + x_offset] = value
+    np.save(path, image)
+
+
+def _png_size(payload: bytes) -> tuple[int, int]:
+    assert payload.startswith(b"\x89PNG\r\n\x1a\n")
+    return struct.unpack(">II", payload[16:24])
+
+
+def _confirm_definition(client: TestClient) -> str:
+    client.post("/api/camera/open", json={"profile": "dev_mock"})
+    response = client.post(
+        "/api/setup/confirm",
+        json={
+            "name": "live-offline",
+            "target_family": "balloon_envelope",
+            "roi": {
+                "center_x": 110.0,
+                "center_y": 110.0,
+                "width": 160.0,
+                "height": 100.0,
+                "angle_deg": 0.0,
+                "coordinate_space": "acquisition",
+            },
+            "recipe_name": "balloon_envelope_default",
+            "segmentation": {
+                "polarity": "dark_on_light",
+                "threshold_mode": "fixed",
+                "threshold_value": 160,
+                "blur_kernel": 3,
+                "close_kernel": 1,
+                "open_kernel": 1,
+                "min_component_area_px": 20,
+                "fill_internal_holes": False,
+            },
+            "detector": {
+                "detector_kind": "balloon_envelope_detector",
+                "envelope_mode": "solid_balloon",
+                "contact_source": "filled_envelope",
+                "measurement_model": "blank_object_blank",
+                "min_quality": 0.65,
+                "max_point_jump_px": 25.0,
+                "reject_contact_on_roi_boundary": True,
+                "boundary_margin_px": 4.0,
+                "ignore_internal_texture": True,
+                "fill_internal_holes": True,
+                "bridge_mesh_gaps": True,
+            },
+        },
+    )
+    assert response.status_code == 200
+    return str(response.json()["measurement_definition_id"])
+
+
+def _open_live_run(
+    client: TestClient,
+    *,
+    frames_dir: Path | None,
+    measurement_definition_id: str,
+    loop: bool = True,
+) -> dict[str, object]:
+    payload = {
+        "measurement_definition_id": measurement_definition_id,
+        "frames_dir": str(frames_dir) if frames_dir is not None else None,
+        "fps": 10.0,
+        "loop": loop,
+        "dataset_label": None,
+        "start_frame_index": 0,
+        "max_preview_width": 160,
+    }
+    response = client.post("/api/offline-run/open", json=payload)
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_offline_run_open_uses_env_and_does_not_leak_absolute_path(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    frames_dir = tmp_path / "private_frames"
+    frames_dir.mkdir()
+    _write_frame(frames_dir / "frame_000001.npy")
+    _write_frame(frames_dir / "frame_000002.npy", x_offset=4)
+    monkeypatch.setenv("YYT1771_AF_OFFLINE_DIR", str(frames_dir))
+    client = TestClient(app)
+    measurement_definition_id = _confirm_definition(client)
+
+    payload = _open_live_run(
+        client,
+        frames_dir=None,
+        measurement_definition_id=measurement_definition_id,
+    )
+
+    serialized = json.dumps(payload)
+    assert str(frames_dir) not in serialized
+    assert payload["opened"] is True
+    assert str(payload["session_id"]).startswith("offline_run_")
+    assert payload["frame_count"] == 2
+    assert payload["dataset_label"] == "private_frames"
+    assert payload["measurement_definition_id"] == measurement_definition_id
+
+
+def test_offline_run_next_seek_previous_loop_and_preview_are_session_scoped(
+    tmp_path: Path,
+) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    _write_frame(frames_dir / "frame_1.npy")
+    _write_frame(frames_dir / "frame_2.npy", x_offset=5)
+    client = TestClient(app)
+    measurement_definition_id = _confirm_definition(client)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+
+    first = client.post(f"/api/offline-run/{session_id}/next").json()
+    second = client.post(f"/api/offline-run/{session_id}/next").json()
+    looped = client.post(f"/api/offline-run/{session_id}/next").json()
+    previous = client.post(f"/api/offline-run/{session_id}/previous").json()
+    seek = client.post(f"/api/offline-run/{session_id}/seek", json={"frame_index": 1}).json()
+    preview = client.get(f"/api/offline-run/{session_id}/frame/1/preview.png?max_width=160")
+
+    assert first["frame_index"] == 0
+    assert first["frame_name"] == "frame_1.npy"
+    assert first["preview_url"].startswith(f"/api/offline-run/{session_id}/frame/0/")
+    assert first["detection"]["point_a"]["coordinate_space"] == "acquisition"
+    assert first["detection"]["diagnostics"]["measurement_line_y"] is not None
+    assert first["runtime"]["run_mode"] == "live_offline"
+    assert first["runtime"]["recipe_locked"] is True
+    assert second["frame_index"] == 1
+    assert looped["frame_index"] == 0
+    assert previous["frame_index"] == 1
+    assert seek["frame_index"] == 1
+    assert preview.status_code == 200
+    assert preview.headers["content-type"] == "image/png"
+    assert _png_size(preview.content) == (160, 110)
+
+
+def test_offline_run_loop_false_returns_end_of_stream(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    _write_frame(frames_dir / "frame_000001.npy")
+    client = TestClient(app)
+    measurement_definition_id = _confirm_definition(client)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+        loop=False,
+    )
+    session_id = opened["session_id"]
+
+    first = client.post(f"/api/offline-run/{session_id}/next").json()
+    ended = client.post(f"/api/offline-run/{session_id}/next").json()
+
+    assert first["frame_index"] == 0
+    assert first["end_of_stream"] is False
+    assert ended["frame_index"] == 0
+    assert ended["end_of_stream"] is True
+
+
+def test_offline_run_close_makes_session_unavailable(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    _write_frame(frames_dir / "frame_000001.npy")
+    client = TestClient(app)
+    measurement_definition_id = _confirm_definition(client)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+
+    close = client.post(f"/api/offline-run/{session_id}/close")
+    next_response = client.post(f"/api/offline-run/{session_id}/next")
+
+    assert close.status_code == 200
+    assert close.json() == {"session_id": session_id, "closed": True}
+    assert next_response.status_code == 404

@@ -75,7 +75,7 @@ def load_config_file(path: Path) -> dict[str, Any]:
 
 
 def load_camera_profile_config(profile: str | Path) -> CameraProfileConfig:
-    path = _resolve_config_reference(profile, CONFIGS_DIR / "profiles")
+    path = _resolve_camera_profile_reference(profile)
     return CameraProfileConfig.model_validate(load_config_file(path))
 
 
@@ -133,6 +133,24 @@ def _resolve_config_reference(reference: str | Path, folder: Path) -> Path:
     if path is None:
         raise FileNotFoundError(f"config not found: {reference}")
     return path
+
+
+def _resolve_camera_profile_reference(reference: str | Path) -> Path:
+    raw_path = Path(reference)
+    if raw_path.exists() and raw_path.is_file():
+        return raw_path
+
+    for folder in (CONFIGS_DIR / "local", CONFIGS_DIR / "profiles"):
+        path = _find_config_reference(reference, folder)
+        if path is not None:
+            return path
+
+    if raw_path.name == "dev_lab":
+        path = _find_config_reference("dev_lab.example", CONFIGS_DIR / "profiles")
+        if path is not None:
+            return path
+
+    raise FileNotFoundError(f"config not found: {reference}")
 
 
 def _find_config_reference(reference: str | Path, folder: Path) -> Path | None:

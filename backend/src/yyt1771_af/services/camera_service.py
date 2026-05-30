@@ -8,6 +8,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from yyt1771_af.camera.base import CameraSource
+from yyt1771_af.camera.hik_mvs import HikMvsCameraSource
 from yyt1771_af.camera.mock import MockCameraSource
 from yyt1771_af.camera.offline import OfflineFolderCameraSource
 from yyt1771_af.core.config import load_camera_profile_config, resolve_configured_path
@@ -182,6 +183,8 @@ class CameraService:
                 resolve_configured_path(Path(str(folder_value))),
                 loop=loop,
             )
+        if camera_type == "hik_mvs":
+            return HikMvsCameraSource(camera_config)
         raise ValueError(f"unsupported camera profile: {profile}")
 
     def _initial_frame(self, source: CameraSource) -> Frame:
@@ -211,7 +214,7 @@ def _truthy(value: str) -> bool:
 
 
 def _profile_reference(profile: str) -> str:
-    return {"mock": "dev_mock", "offline": "dev_offline"}.get(profile, profile)
+    return {"mock": "dev_mock", "offline": "dev_offline", "lab": "dev_lab"}.get(profile, profile)
 
 
 def _camera_preview_url(

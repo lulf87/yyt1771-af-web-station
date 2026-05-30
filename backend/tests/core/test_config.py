@@ -55,7 +55,7 @@ def test_camera_profile_and_detector_recipe_configs_are_readable() -> None:
     assert balloon_recipe.detector.detector_kind.value == "balloon_envelope_detector"
     assert wire_recipe.segmentation.threshold_mode == "fixed"
     assert wire_recipe.segmentation.polarity == "dark_on_light"
-    assert wire_recipe.detector.measurement_mode == "outer_to_outer"
+    assert wire_recipe.detector.measurement_mode == "wire_bundle_envelope"
     assert wire_recipe.detector.detector_kind.value == "wire_strip_detector"
 
 
