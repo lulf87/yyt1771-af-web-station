@@ -10,12 +10,15 @@ from yyt1771_af.core.models import (
     SegmentationParams,
 )
 from yyt1771_af.core.statuses import DetectionStatus, DetectorKind, TargetFamily
+from yyt1771_af.vision.detection_debug import DebugLevel, wants_full_diagnostics
 from yyt1771_af.vision.roi_ops import (
     ContactRejection,
+    assert_ab_invariants,
     component_bbox,
     component_roi_margins,
     extract_roi_crop,
     failure_result,
+    rebase_result_to_acquisition,
     roi_is_inside_frame,
     rotated_roi_mask,
     select_roi_local_chord_contacts_debug,
@@ -40,6 +43,7 @@ class BalloonEnvelopeDetector:
         roi: RotatedRoi,
         segmentation: SegmentationParams | None = None,
         params: BalloonEnvelopeDetectorParams | None = None,
+        debug_level: DebugLevel = "full",
     ) -> DetectionResult:
         params = params or BalloonEnvelopeDetectorParams()
         segmentation = segmentation or _segmentation_defaults_for_params(params)
@@ -56,9 +60,28 @@ class BalloonEnvelopeDetector:
             )
 
         crop = extract_roi_crop(frame, roi, padding_px=morphology_padding_px(segmentation))
-        frame = crop.frame
-        roi = crop.roi
+        result = self._detect_cropped(
+            frame=crop.frame,
+            roi=crop.roi,
+            segmentation=segmentation,
+            params=params,
+            debug_level=debug_level,
+        )
+        # ``extract_roi_crop`` returned crop-local acquisition coordinates; shift
+        # every acquisition-space output back to true acquisition coordinates.
+        rebase_result_to_acquisition(result, crop.offset_x, crop.offset_y)
+        return result
 
+    def _detect_cropped(
+        self,
+        *,
+        frame: np.ndarray,
+        roi: RotatedRoi,
+        segmentation: SegmentationParams,
+        params: BalloonEnvelopeDetectorParams,
+        debug_level: DebugLevel,
+    ) -> DetectionResult:
+        wants_full = wants_full_diagnostics(debug_level)
         roi_mask = rotated_roi_mask(frame.shape, roi)
         roi_area = max(1, int(np.count_nonzero(roi_mask)))
         segmentation_layers, contrast_quality, segmentation_debug = (
@@ -155,6 +178,7 @@ class BalloonEnvelopeDetector:
             raw_foreground_mask=segmentation_layers.raw_foreground,
             bridged_foreground_mask=segmentation_layers.morphology_foreground,
             filled_envelope_mask=filled_envelope,
+            compute_debug_intervals=wants_full,
         )
         component_diagnostics = (
             layer_diagnostics
@@ -179,6 +203,23 @@ class BalloonEnvelopeDetector:
                 | {
                     "message": _failure_message(selection.status, selection.debug.rejected_side),
                 },
+            )
+
+        invariant_violation = assert_ab_invariants(
+            selection.point_a,
+            selection.point_b,
+            roi=roi,
+            frame_shape=frame.shape,
+            foreground_mask=component.mask,
+        )
+        if invariant_violation is not None:
+            return self._failure(
+                DetectionStatus.COORDINATE_MAPPING_ERROR,
+                quality=contrast_quality,
+                contour_area_px=float(component.area_px),
+                candidate_components=len(components),
+                diagnostics_extra=component_diagnostics
+                | {"message": f"Formal A/B invariant violation: {invariant_violation}"},
             )
 
         quality = max(params.min_quality, min(0.98, 0.65 + 0.3 * contrast_quality))

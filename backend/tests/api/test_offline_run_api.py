@@ -386,6 +386,43 @@ def test_offline_run_next_includes_material_time_and_mock_temperature(tmp_path: 
     assert first["runtime"]["temperature_status"] == "ok"
 
 
+def test_offline_run_next_reports_timing_and_uses_basic_debug_level(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "wire_frames"
+    frames_dir.mkdir()
+    np.save(frames_dir / "frame_000001.npy", _wire_bundle_frame())
+    np.save(frames_dir / "frame_000002.npy", _wire_bundle_frame())
+    client = TestClient(app)
+    measurement_definition_id = _confirm_wire_definition(client)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+
+    played = client.post(f"/api/offline-run/{session_id}/next").json()
+    seeked = client.post(f"/api/offline-run/{session_id}/seek", json={"frame_index": 0}).json()
+
+    runtime = played["runtime"]
+    for key in ("load_ms", "detect_ms", "api_total_ms"):
+        assert isinstance(runtime[key], (int, float))
+        assert runtime[key] >= 0.0
+    assert "preview_encode_ms" in runtime
+
+    # Playback uses the lightweight basic level; seek/single-frame uses full.
+    assert played["runtime"]["debug_level"] == "basic"
+    assert seeked["runtime"]["debug_level"] == "full"
+
+    # Both produce the same valid formal A/B; only diagnostic depth differs.
+    assert played["detection"]["valid"] is True
+    assert seeked["detection"]["valid"] is True
+    assert played["detection"]["distance_px"] == seeked["detection"]["distance_px"]
+    # Serialized diagnostics drop None fields, so the basic playback frame omits
+    # the heavy raw intervals while the full seek frame includes them.
+    assert "raw_intervals" not in played["detection"]["diagnostics"]
+    assert seeked["detection"]["diagnostics"]["raw_intervals"] is not None
+
+
 def test_offline_run_close_makes_session_unavailable(tmp_path: Path) -> None:
     frames_dir = tmp_path / "frames"
     frames_dir.mkdir()

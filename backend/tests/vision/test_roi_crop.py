@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from yyt1771_af.core.models import RotatedRoi
 from yyt1771_af.core.statuses import CoordinateSpace
 from yyt1771_af.vision.roi_ops import extract_roi_crop, rotated_roi_mask

@@ -14,7 +14,7 @@ from yyt1771_af.core.models import (
     RotatedRoi,
 )
 from yyt1771_af.core.statuses import CoordinateSpace, DetectionStatus, DetectorKind, TargetFamily
-from yyt1771_af.vision.segmentation import BinaryComponent, contour_mask, morphology_padding_px
+from yyt1771_af.vision.segmentation import BinaryComponent, contour_mask
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,6 +278,126 @@ def acquisition_to_roi_local_point(roi: RotatedRoi, point: Point2D) -> Point2D:
     )
 
 
+def rebase_result_to_acquisition(
+    result: DetectionResult, offset_x: int, offset_y: int
+) -> DetectionResult:
+    """Translate every acquisition-space output by the crop offset, in place.
+
+    ``extract_roi_crop`` shifts the frame and ROI into a small crop-local window
+    so detection runs cheaply. Every acquisition-space point the detector
+    produces (formal ``point_a``/``point_b`` and acquisition-space diagnostics
+    such as ``preferred_point_xy``, ``rejected_candidate_point_a``/``_b`` and
+    ``selected_component_bbox``) is therefore expressed in crop-local pixels and
+    must be shifted back by ``(offset_x, offset_y)`` to become true acquisition
+    coordinates.
+
+    ROI-local fields, ``distance_px``, spans and interval ``local_x``/``line_y``
+    values are translation-invariant and are left untouched, so the measured
+    distance never changes.
+    """
+    if offset_x == 0 and offset_y == 0:
+        return result
+    result.point_a = _shift_acquisition_point(result.point_a, offset_x, offset_y)
+    result.point_b = _shift_acquisition_point(result.point_b, offset_x, offset_y)
+    diagnostics = result.diagnostics
+    diagnostics.preferred_point_xy = _shift_acquisition_point(
+        diagnostics.preferred_point_xy, offset_x, offset_y
+    )
+    diagnostics.rejected_candidate_point_a = _shift_acquisition_point(
+        diagnostics.rejected_candidate_point_a, offset_x, offset_y
+    )
+    diagnostics.rejected_candidate_point_b = _shift_acquisition_point(
+        diagnostics.rejected_candidate_point_b, offset_x, offset_y
+    )
+    diagnostics.selected_component_bbox = _shift_bbox(
+        diagnostics.selected_component_bbox, offset_x, offset_y
+    )
+    return result
+
+
+def assert_ab_invariants(
+    point_a: Point2D | None,
+    point_b: Point2D | None,
+    *,
+    roi: RotatedRoi,
+    frame_shape: tuple[int, ...],
+    foreground_mask: np.ndarray,
+    boundary_tolerance_px: float = 1.0,
+) -> str | None:
+    """Validate formal A/B against the detection contract.
+
+    Returns ``None`` when both points satisfy every invariant, otherwise a short
+    reason string describing the first violation. The caller maps a non-``None``
+    reason to :class:`DetectionStatus.COORDINATE_MAPPING_ERROR`.
+
+    The points and masks are evaluated in the same (crop-local) coordinate space
+    the detector worked in; because the crop ROI is the original ROI shifted by
+    the same offset, ROI containment and foreground membership are identical
+    before and after :func:`rebase_result_to_acquisition`.
+    """
+    height, width = int(frame_shape[0]), int(frame_shape[1])
+    mask = np.asarray(foreground_mask, dtype=bool)
+    half_width = roi.width / 2.0
+    half_height = roi.height / 2.0
+    for name, point in (("point_a", point_a), ("point_b", point_b)):
+        if point is None:
+            return f"{name}_missing"
+        if point.coordinate_space is not CoordinateSpace.ACQUISITION:
+            return f"{name}_not_acquisition"
+        if not (
+            -boundary_tolerance_px <= point.x <= width - 1 + boundary_tolerance_px
+            and -boundary_tolerance_px <= point.y <= height - 1 + boundary_tolerance_px
+        ):
+            return f"{name}_outside_frame"
+        local = acquisition_to_roi_local_point(roi, point)
+        if (
+            abs(local.x) > half_width + boundary_tolerance_px
+            or abs(local.y) > half_height + boundary_tolerance_px
+        ):
+            return f"{name}_outside_roi"
+        if not _point_near_mask(mask, point.x, point.y, radius=1):
+            return f"{name}_off_foreground"
+    return None
+
+
+def _shift_acquisition_point(point: Point2D | None, offset_x: int, offset_y: int) -> Point2D | None:
+    if point is None:
+        return None
+    if point.coordinate_space is not CoordinateSpace.ACQUISITION:
+        return point
+    return Point2D(
+        x=point.x + offset_x,
+        y=point.y + offset_y,
+        coordinate_space=CoordinateSpace.ACQUISITION,
+    )
+
+
+def _shift_bbox(bbox: ComponentBBox | None, offset_x: int, offset_y: int) -> ComponentBBox | None:
+    if bbox is None:
+        return None
+    return ComponentBBox(
+        min_x=bbox.min_x + offset_x,
+        min_y=bbox.min_y + offset_y,
+        max_x=bbox.max_x + offset_x,
+        max_y=bbox.max_y + offset_y,
+    )
+
+
+def _point_near_mask(mask: np.ndarray, x: float, y: float, *, radius: int) -> bool:
+    if mask.size == 0:
+        return False
+    height, width = mask.shape[:2]
+    px = int(round(x))
+    py = int(round(y))
+    y0 = max(0, py - radius)
+    y1 = min(height, py + radius + 1)
+    x0 = max(0, px - radius)
+    x1 = min(width, px + radius + 1)
+    if y1 <= y0 or x1 <= x0:
+        return False
+    return bool(np.any(mask[y0:y1, x0:x1]))
+
+
 def select_roi_local_chord_contacts_debug(
     mask: np.ndarray,
     roi: RotatedRoi,
@@ -300,6 +420,7 @@ def select_roi_local_chord_contacts_debug(
     prefer_largest_formal_span: bool = False,
     reject_global_foreground_boundary: bool = True,
     max_internal_gap_px: float | None = None,
+    compute_debug_intervals: bool = True,
 ) -> ContactSelection | ContactRejection:
     foreground = np.asarray(mask, dtype=bool)
     edge_mask = contour_mask(foreground)
@@ -322,8 +443,14 @@ def select_roi_local_chord_contacts_debug(
         # envelope span) do not influence candidate scoring or selection, so they
         # are computed lazily for the single line that actually wins instead of
         # for every scanned line. This keeps formal A/B and status identical while
-        # removing the dominant per-line debug cost during live playback.
-        if candidate is None or not candidate.carries_debug_intervals:
+        # removing the dominant per-line debug cost during live playback. With
+        # ``compute_debug_intervals=False`` (basic debug level) they are skipped
+        # entirely, leaving the diagnostic fields ``None``.
+        if (
+            candidate is None
+            or not candidate.carries_debug_intervals
+            or not compute_debug_intervals
+        ):
             return candidate
         return replace(
             candidate,

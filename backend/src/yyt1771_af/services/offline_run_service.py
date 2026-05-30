@@ -34,6 +34,7 @@ from yyt1771_af.services.offline_datasets import resolve_offline_dataset_dir
 from yyt1771_af.services.setup_service import _serialize_detection_result, setup_service
 from yyt1771_af.services.temperature_service import temperature_service
 from yyt1771_af.vision.detection import detect_target
+from yyt1771_af.vision.detection_debug import DebugLevel
 
 # Live Offline Run trades a slightly larger PNG for much cheaper CPU per frame.
 # zlib level 1 encodes a 960px preview in ~13 ms instead of ~115 ms at level 9,
@@ -125,6 +126,7 @@ class OfflineRunSession:
     previous_valid_detection: DetectionResult | None = None
     temperature_trace: OfflineCaptureTemperatureTrace | None = None
     end_of_stream: bool = False
+    last_preview_encode_ms: float | None = None
 
 
 class OfflineRunService:
@@ -204,10 +206,13 @@ class OfflineRunService:
                 session,
                 session.current_frame_index,
                 end_of_stream=True,
+                debug_level="basic",
             )
 
         frame_index = session.next_frame_index
-        response = self._frame_response(session, frame_index, end_of_stream=False)
+        response = self._frame_response(
+            session, frame_index, end_of_stream=False, debug_level="basic"
+        )
         session.current_frame_index = frame_index
         if frame_index >= len(session.frame_paths) - 1:
             if session.loop:
@@ -268,6 +273,7 @@ class OfflineRunService:
             session.preview_png_cache.move_to_end(frame_index)
             return session.preview_png_cache[frame_index]
         frame = self._read_frame(session, frame_index)
+        encode_start = time.perf_counter()
         png = build_frame_preview_png(
             frame=frame,
             preview_url=_preview_url(
@@ -280,6 +286,7 @@ class OfflineRunService:
             max_height=max_height,
             compression_level=_LIVE_PREVIEW_COMPRESSION_LEVEL,
         ).png
+        session.last_preview_encode_ms = round((time.perf_counter() - encode_start) * 1000.0, 3)
         if max_height is None and max_width == session.max_preview_width:
             session.preview_png_cache[frame_index] = png
             session.preview_png_cache.move_to_end(frame_index)
@@ -293,8 +300,12 @@ class OfflineRunService:
         frame_index: int,
         *,
         end_of_stream: bool,
+        debug_level: DebugLevel = "full",
     ) -> OfflineRunFrameResponse:
+        api_start = time.perf_counter()
+        load_start = time.perf_counter()
         frame = self._read_frame(session, frame_index)
+        load_ms = round((time.perf_counter() - load_start) * 1000.0, 3)
         preview_url = _preview_url(
             session.session_id,
             frame_index,
@@ -309,7 +320,9 @@ class OfflineRunService:
             preview_url=preview_url,
             max_width=session.max_preview_width,
         )
-        detection_result = self._detect_frame(session, frame)
+        detect_start = time.perf_counter()
+        detection_result = self._detect_frame(session, frame, debug_level=debug_level)
+        detect_ms = round((time.perf_counter() - detect_start) * 1000.0, 3)
         if session.previous_valid_detection is not None:
             record_previous_frame_diagnostics(
                 detection_result,
@@ -328,6 +341,11 @@ class OfflineRunService:
             "frame_name": frame.frame_name,
             "relative_time_s": _relative_time_s(session, frame_index),
             "total_duration_s": _total_duration_s(session),
+            "debug_level": debug_level,
+            "load_ms": load_ms,
+            "detect_ms": detect_ms,
+            "preview_encode_ms": session.last_preview_encode_ms,
+            "api_total_ms": round((time.perf_counter() - api_start) * 1000.0, 3),
             **_temperature_for_frame(session, frame_index),
         }
         response = OfflineRunFrameResponse(
@@ -354,6 +372,8 @@ class OfflineRunService:
         self,
         session: OfflineRunSession,
         frame: Frame,
+        *,
+        debug_level: DebugLevel = "full",
     ) -> DetectionResult:
         measurement_definition = session.measurement_definition
         frame_ref = FrameRef(
@@ -388,6 +408,7 @@ class OfflineRunService:
                 target_family=measurement_definition.target_family,
                 segmentation=measurement_definition.segmentation,
                 params=measurement_definition.detector,
+                debug_level=debug_level,
             )
             result.frame_ref = frame_ref
         return result

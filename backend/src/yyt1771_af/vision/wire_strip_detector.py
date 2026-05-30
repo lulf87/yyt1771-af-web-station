@@ -10,13 +10,16 @@ from yyt1771_af.core.models import (
     WireStripDetectorParams,
 )
 from yyt1771_af.core.statuses import DetectionStatus, DetectorKind, TargetFamily
+from yyt1771_af.vision.detection_debug import DebugLevel, wants_full_diagnostics
 from yyt1771_af.vision.roi_ops import (
     ContactRejection,
+    assert_ab_invariants,
     component_bbox,
     extract_roi_crop,
     failure_result,
     mask_bbox,
     mask_roi_margins,
+    rebase_result_to_acquisition,
     roi_is_inside_frame,
     roi_local_to_acquisition_point,
     rotated_roi_mask,
@@ -54,6 +57,7 @@ class WireStripDetector:
         roi: RotatedRoi,
         segmentation: SegmentationParams | None = None,
         params: WireStripDetectorParams | None = None,
+        debug_level: DebugLevel = "full",
     ) -> DetectionResult:
         segmentation = segmentation or SegmentationParams()
         params = params or WireStripDetectorParams()
@@ -70,9 +74,28 @@ class WireStripDetector:
             )
 
         crop = extract_roi_crop(frame, roi, padding_px=morphology_padding_px(segmentation))
-        frame = crop.frame
-        roi = crop.roi
+        result = self._detect_cropped(
+            frame=crop.frame,
+            roi=crop.roi,
+            segmentation=segmentation,
+            params=params,
+            debug_level=debug_level,
+        )
+        # ``extract_roi_crop`` returned crop-local acquisition coordinates; shift
+        # every acquisition-space output back to true acquisition coordinates.
+        rebase_result_to_acquisition(result, crop.offset_x, crop.offset_y)
+        return result
 
+    def _detect_cropped(
+        self,
+        *,
+        frame: np.ndarray,
+        roi: RotatedRoi,
+        segmentation: SegmentationParams,
+        params: WireStripDetectorParams,
+        debug_level: DebugLevel,
+    ) -> DetectionResult:
+        wants_full = wants_full_diagnostics(debug_level)
         roi_mask = rotated_roi_mask(frame.shape, roi)
         foreground, contrast_quality, segmentation_debug = segment_target_mask_debug(
             frame,
@@ -126,12 +149,16 @@ class WireStripDetector:
                 diagnostics_extra=_segmentation_diagnostics(segmentation_debug)
                 | {"candidate_component_count": len(components)}
                 | recipe_diagnostics
-                | _rejected_interval_diagnostics(
-                    foreground=foreground,
-                    analysis=wire_analysis,
-                    components=components,
-                    roi=roi,
-                    line_y=0.0,
+                | (
+                    _rejected_interval_diagnostics(
+                        foreground=foreground,
+                        analysis=wire_analysis,
+                        components=components,
+                        roi=roi,
+                        line_y=0.0,
+                    )
+                    if wants_full
+                    else {}
                 )
                 | {"message": "No wire-like foreground component remained after filtering."},
             )
@@ -151,6 +178,7 @@ class WireStripDetector:
             prefer_largest_formal_span=True,
             reject_global_foreground_boundary=False,
             max_internal_gap_px=_WIRE_MAX_INTERNAL_GAP_RATIO * roi.width,
+            compute_debug_intervals=wants_full,
         )
         selected_bbox = mask_bbox(wire_foreground)
         margins = mask_roi_margins(wire_foreground, roi)
@@ -176,16 +204,37 @@ class WireStripDetector:
                 diagnostics_extra=component_diagnostics
                 | _contact_diagnostics(selection.debug)
                 | {"neighbor_line_support": selection.debug.neighbor_line_support}
-                | _rejected_interval_diagnostics(
-                    foreground=foreground,
-                    analysis=wire_analysis,
-                    components=components,
-                    roi=roi,
-                    line_y=selection.debug.measurement_line_y,
+                | (
+                    _rejected_interval_diagnostics(
+                        foreground=foreground,
+                        analysis=wire_analysis,
+                        components=components,
+                        roi=roi,
+                        line_y=selection.debug.measurement_line_y,
+                    )
+                    if wants_full
+                    else {}
                 )
                 | {
                     "message": _failure_message(selection.status, selection.debug.rejected_side),
                 },
+            )
+
+        invariant_violation = assert_ab_invariants(
+            selection.point_a,
+            selection.point_b,
+            roi=roi,
+            frame_shape=frame.shape,
+            foreground_mask=wire_foreground,
+        )
+        if invariant_violation is not None:
+            return self._failure(
+                DetectionStatus.COORDINATE_MAPPING_ERROR,
+                quality=contrast_quality,
+                contour_area_px=float(np.count_nonzero(foreground)),
+                candidate_components=len(components),
+                diagnostics_extra=component_diagnostics
+                | {"message": f"Formal A/B invariant violation: {invariant_violation}"},
             )
 
         quality = max(params.min_quality, min(0.98, 0.62 + 0.3 * contrast_quality))
@@ -238,12 +287,16 @@ class WireStripDetector:
                 "measurement_mode": selection.measurement_mode,
                 "neighbor_line_support": selection.neighbor_line_support,
             }
-            | _rejected_interval_diagnostics(
-                foreground=foreground,
-                analysis=wire_analysis,
-                components=components,
-                roi=roi,
-                line_y=selection.measurement_line_y,
+            | (
+                _rejected_interval_diagnostics(
+                    foreground=foreground,
+                    analysis=wire_analysis,
+                    components=components,
+                    roi=roi,
+                    line_y=selection.measurement_line_y,
+                )
+                if wants_full
+                else {}
             )
         )
         return result

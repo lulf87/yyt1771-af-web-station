@@ -62,11 +62,13 @@ export function RunPage({
   const [liveFps, setLiveFps] = useState(10);
   const [liveLoop, setLiveLoop] = useState(true);
   const [isLivePlaying, setIsLivePlaying] = useState(false);
+  const [liveFrameIntervalMs, setLiveFrameIntervalMs] = useState<number | null>(null);
   const inFlightLiveRequest = useRef(false);
   const liveTimer = useRef<number | null>(null);
   const liveSessionIdRef = useRef<string | null>(null);
   const liveFpsRef = useRef(liveFps);
   liveFpsRef.current = liveFps;
+  const lastFrameArrivalRef = useRef<number | null>(null);
   const advanceLiveNextRef = useRef<
     (args: { fromPlaybackLoop: boolean }) => Promise<OfflineRunFrame | null>
   >(async () => null);
@@ -285,6 +287,7 @@ export function RunPage({
 
     let cancelled = false;
     let wakeTimer: number | null = null;
+    lastFrameArrivalRef.current = null;
 
     const sleep = (delayMs: number) =>
       new Promise<void>((resolve) => {
@@ -302,6 +305,15 @@ export function RunPage({
           await sleep(10);
           continue;
         }
+        // Measured wall-clock interval between rendered playback frames. This is
+        // the real perceived playback rate (1000 / interval ~= fps).
+        const arrivedAt = performance.now();
+        if (lastFrameArrivalRef.current !== null) {
+          setLiveFrameIntervalMs(
+            Math.round((arrivedAt - lastFrameArrivalRef.current) * 10) / 10,
+          );
+        }
+        lastFrameArrivalRef.current = arrivedAt;
         const elapsedMs = performance.now() - startedAt;
         const waitMs = Math.max(0, 1000 / Math.max(1, liveFpsRef.current) - elapsedMs);
         if (waitMs > 0) {
@@ -312,6 +324,7 @@ export function RunPage({
 
     return () => {
       cancelled = true;
+      lastFrameArrivalRef.current = null;
       if (wakeTimer !== null) {
         window.clearTimeout(wakeTimer);
       }
@@ -499,6 +512,10 @@ export function RunPage({
           {runMode === "live_offline" ? (
             <section className="panel-section">
               <h2>Diagnostics</h2>
+              <LiveTimingReadout
+                runtime={liveFrame?.runtime}
+                frameIntervalMs={isLivePlaying ? liveFrameIntervalMs : null}
+              />
               <StatusPanel
                 cameraStatus={liveCameraStatus}
                 detection={activeDetection}
@@ -532,6 +549,45 @@ export function RunPage({
         </div>
       </section>
     </main>
+  );
+}
+
+function LiveTimingReadout({
+  runtime,
+  frameIntervalMs,
+}: {
+  runtime: Record<string, unknown> | undefined;
+  frameIntervalMs: number | null;
+}) {
+  const detectMs = runtimeNumber(runtime, "detect_ms");
+  const loadMs = runtimeNumber(runtime, "load_ms");
+  const apiTotalMs = runtimeNumber(runtime, "api_total_ms");
+  const previewEncodeMs = runtimeNumber(runtime, "preview_encode_ms");
+  const debugLevel = runtimeString(runtime, "debug_level");
+  const measuredFps =
+    frameIntervalMs !== null && frameIntervalMs > 0
+      ? Math.round((1000 / frameIntervalMs) * 10) / 10
+      : null;
+  const rows: Array<[string, string]> = [
+    ["Measured fps", measuredFps !== null ? `${measuredFps}` : "N/A"],
+    ["Frame interval ms", frameIntervalMs !== null ? `${frameIntervalMs}` : "N/A"],
+    ["Detect ms", detectMs !== null ? `${detectMs}` : "N/A"],
+    ["Frame load ms", loadMs !== null ? `${loadMs}` : "N/A"],
+    ["Preview encode ms", previewEncodeMs !== null ? `${previewEncodeMs}` : "N/A"],
+    ["API total ms", apiTotalMs !== null ? `${apiTotalMs}` : "N/A"],
+    ["Debug level", debugLevel ?? "N/A"],
+  ];
+  return (
+    <section className="live-timing" aria-label="Live timing">
+      <dl className="metric-list">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 

@@ -421,6 +421,12 @@ select {
   color: #b42318;
 }
 
+.live-timing {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e3e8ef;
+}
+
 .debug-diagnostics {
   display: grid;
   gap: 10px;

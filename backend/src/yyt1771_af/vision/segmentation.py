@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 
 import numpy as np
 
 from yyt1771_af.core.models import SegmentationParams
+from yyt1771_af.vision import morphology
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,42 +171,54 @@ def segment_target_mask_layers_debug(
     )
 
 
-def connected_components(mask: np.ndarray, min_area_px: int) -> list[BinaryComponent]:
+def connected_components(
+    mask: np.ndarray, min_area_px: int, *, force_numpy: bool = False
+) -> list[BinaryComponent]:
+    """8-connectivity components, sorted by area (desc) then discovery order.
+
+    Labelling is delegated to :mod:`yyt1771_af.vision.morphology` (SciPy when
+    available, pure NumPy otherwise). The component ordering reproduces the
+    legacy pure-Python flood fill: descending area, ties broken by the
+    row-major position of each component's first pixel, so detector behaviour is
+    independent of the active backend.
+    """
     source = np.asarray(mask, dtype=bool)
-    visited = np.zeros(source.shape, dtype=bool)
-    components: list[BinaryComponent] = []
-    height, width = source.shape
+    labels, count = morphology.label(source, force_numpy=force_numpy)
+    if count == 0:
+        return []
 
-    for start_y, start_x in np.argwhere(source):
-        if visited[start_y, start_x]:
+    width = source.shape[1]
+    rows, cols = np.nonzero(labels)
+    if rows.size == 0:
+        return []
+    label_values = labels[rows, cols]
+    order = np.argsort(label_values, kind="stable")
+    rows = rows[order]
+    cols = cols[order]
+    label_values = label_values[order]
+
+    boundaries = np.flatnonzero(np.diff(label_values)) + 1
+    starts = np.concatenate(([0], boundaries))
+    ends = np.concatenate((boundaries, [label_values.size]))
+
+    raw_components: list[tuple[int, int, np.ndarray]] = []
+    for start, end in zip(starts, ends, strict=False):
+        area = int(end - start)
+        if area < min_area_px:
             continue
+        first_pixel_rowmajor = int(rows[start]) * width + int(cols[start])
+        coordinates_array = np.column_stack(
+            (rows[start:end], cols[start:end])
+        ).astype(np.int32)
+        raw_components.append((area, first_pixel_rowmajor, coordinates_array))
 
-        stack = [(int(start_y), int(start_x))]
-        visited[start_y, start_x] = True
-        coordinates: list[tuple[int, int]] = []
+    raw_components.sort(key=lambda item: (-item[0], item[1]))
 
-        while stack:
-            y, x = stack.pop()
-            coordinates.append((y, x))
-            for neighbor_y, neighbor_x in _neighbors8(y, x):
-                if (
-                    0 <= neighbor_y < height
-                    and 0 <= neighbor_x < width
-                    and source[neighbor_y, neighbor_x]
-                    and not visited[neighbor_y, neighbor_x]
-                ):
-                    visited[neighbor_y, neighbor_x] = True
-                    stack.append((neighbor_y, neighbor_x))
-
-        if len(coordinates) >= min_area_px:
-            coordinates_array = np.asarray(coordinates, dtype=np.int32)
-            component_mask = np.zeros(source.shape, dtype=bool)
-            component_mask[coordinates_array[:, 0], coordinates_array[:, 1]] = True
-            components.append(
-                BinaryComponent(mask=component_mask, coordinates_yx=coordinates_array)
-            )
-
-    components.sort(key=lambda component: component.area_px, reverse=True)
+    components: list[BinaryComponent] = []
+    for _area, _first, coordinates_array in raw_components:
+        component_mask = np.zeros(source.shape, dtype=bool)
+        component_mask[coordinates_array[:, 0], coordinates_array[:, 1]] = True
+        components.append(BinaryComponent(mask=component_mask, coordinates_yx=coordinates_array))
     return components
 
 
@@ -222,57 +234,16 @@ def binary_open(mask: np.ndarray, kernel_size: int) -> np.ndarray:
     return binary_dilate(binary_erode(mask, kernel_size), kernel_size)
 
 
-def binary_dilate(mask: np.ndarray, kernel_size: int) -> np.ndarray:
-    radius = kernel_size // 2
-    source = np.asarray(mask, dtype=bool)
-    padded = np.pad(source, radius, mode="constant", constant_values=False)
-    result = np.zeros_like(source, dtype=bool)
-    for offset_y in range(kernel_size):
-        for offset_x in range(kernel_size):
-            result |= padded[
-                offset_y : offset_y + source.shape[0],
-                offset_x : offset_x + source.shape[1],
-            ]
-    return result
+def binary_dilate(mask: np.ndarray, kernel_size: int, *, force_numpy: bool = False) -> np.ndarray:
+    return morphology.binary_dilate(mask, kernel_size, force_numpy=force_numpy)
 
 
-def binary_erode(mask: np.ndarray, kernel_size: int) -> np.ndarray:
-    radius = kernel_size // 2
-    source = np.asarray(mask, dtype=bool)
-    padded = np.pad(source, radius, mode="constant", constant_values=False)
-    result = np.ones_like(source, dtype=bool)
-    for offset_y in range(kernel_size):
-        for offset_x in range(kernel_size):
-            result &= padded[
-                offset_y : offset_y + source.shape[0],
-                offset_x : offset_x + source.shape[1],
-            ]
-    return result
+def binary_erode(mask: np.ndarray, kernel_size: int, *, force_numpy: bool = False) -> np.ndarray:
+    return morphology.binary_erode(mask, kernel_size, force_numpy=force_numpy)
 
 
-def fill_internal_holes(mask: np.ndarray) -> np.ndarray:
-    source = np.asarray(mask, dtype=bool)
-    inverse = ~source
-    reachable_background = np.zeros(source.shape, dtype=bool)
-    height, width = source.shape
-    stack: list[tuple[int, int]] = []
-
-    for x in range(width):
-        stack.extend([(0, x), (height - 1, x)])
-    for y in range(height):
-        stack.extend([(y, 0), (y, width - 1)])
-
-    while stack:
-        y, x = stack.pop()
-        if not (0 <= y < height and 0 <= x < width):
-            continue
-        if reachable_background[y, x] or not inverse[y, x]:
-            continue
-        reachable_background[y, x] = True
-        stack.extend(_neighbors4(y, x))
-
-    holes = inverse & ~reachable_background
-    return source | holes
+def fill_internal_holes(mask: np.ndarray, *, force_numpy: bool = False) -> np.ndarray:
+    return morphology.fill_holes(mask, force_numpy=force_numpy)
 
 
 def contour_mask(mask: np.ndarray) -> np.ndarray:
@@ -482,17 +453,3 @@ def _empty_debug(preferred_point_xy: tuple[float, float] | None) -> Segmentation
         foreground_area_px=0,
         foreground_area_ratio_in_roi=0.0,
     )
-
-
-def _neighbors8(y: int, x: int) -> Iterable[tuple[int, int]]:
-    for offset_y in (-1, 0, 1):
-        for offset_x in (-1, 0, 1):
-            if offset_y != 0 or offset_x != 0:
-                yield y + offset_y, x + offset_x
-
-
-def _neighbors4(y: int, x: int) -> Iterable[tuple[int, int]]:
-    yield y - 1, x
-    yield y + 1, x
-    yield y, x - 1
-    yield y, x + 1
