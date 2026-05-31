@@ -451,10 +451,14 @@ export interface OfflineRunTraceEntry {
   distance_px: number | null;
   measurement_line_y: number | null;
   formal_ab_span_px: number | null;
+  point_a_source_interval?: Record<string, number | null> | null;
+  point_b_source_interval?: Record<string, number | null> | null;
   selected_valid_intervals?: Array<Record<string, number | null>> | null;
   rejected_remote_intervals?: Array<Record<string, number | null>> | null;
   selected_bundle_cluster_id?: number | null;
   selected_bundle_outer_span_px?: number | null;
+  selected_bundle_support_ratio?: number | null;
+  selected_bundle_max_internal_gap_px?: number | null;
   max_bundle_internal_gap_px?: number | null;
   remote_interval_rejection_count?: number | null;
   point_a?: Point2D | null;

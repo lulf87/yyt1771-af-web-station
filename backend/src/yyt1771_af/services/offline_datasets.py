@@ -91,9 +91,7 @@ def _load_configured_datasets() -> list[OfflineDataset]:
             continue
         seen_ids.add(dataset_id)
         label = str(raw_entry.get("label") or dataset_id)
-        datasets.append(
-            OfflineDataset(dataset_id=dataset_id, label=label, frames_dir=frames_dir)
-        )
+        datasets.append(OfflineDataset(dataset_id=dataset_id, label=label, frames_dir=frames_dir))
     return datasets
 
 

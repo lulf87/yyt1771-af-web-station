@@ -88,6 +88,25 @@ For each `next`, `previous`, or `seek` request:
 
 The frontend only maps acquisition coordinates into the SVG overlay. It does not compute formal A/B, formal distance, segmentation, intervals, or contact points.
 
+For `wire_strip` with `wire_bundle_envelope`, a valid basic response carries the
+formal source summary needed to explain A/B without full interval arrays:
+
+- `point_a_source_interval`
+- `point_b_source_interval`
+- `selected_bundle_cluster_id`
+- `selected_bundle_support_ratio`
+- `selected_bundle_max_internal_gap_px`
+- `remote_interval_rejection_count`
+
+Full debug responses additionally carry `selected_valid_intervals`,
+`leftmost_valid_interval`, `rightmost_valid_interval`,
+`rejected_remote_intervals`, and rejected interval reasons.
+
+The detector invariant is that A comes from the left boundary of the leftmost
+selected valid interval and B comes from the right boundary of the rightmost
+selected valid interval. A/B must not come from rejected remote intervals. If
+the invariant fails, the frame is invalid and formal A/B/distance are null.
+
 ## API
 
 Open:
@@ -115,6 +134,7 @@ Session operations:
 ```text
 GET  /api/offline-run/{session_id}/status
 POST /api/offline-run/{session_id}/next
+POST /api/offline-run/{session_id}/inspect
 POST /api/offline-run/{session_id}/previous
 POST /api/offline-run/{session_id}/seek
 POST /api/offline-run/{session_id}/close
@@ -123,6 +143,9 @@ GET  /api/offline-run/{session_id}/frame/{frame_index}/preview.png?max_width=120
 ```
 
 The `preview_url` always includes the session id so multiple sessions cannot cross-read different datasets.
+
+`inspect` re-runs the current frame with `debug_level = full` and does not
+advance `current_frame_index` or `next_frame_index`.
 
 ## Error Model
 
@@ -164,7 +187,11 @@ frames. `GET /api/offline-run/{session_id}/trace` returns sanitized entries with
 - detection status, validity, distance, point A/B
 - ROI-local `measurement_line_y`
 - `formal_ab_span_px`
-- selected wire interval summary
+- formal `point_a_source_interval` and `point_b_source_interval`
+- selected wire interval and bundle-cluster summary
+- `selected_bundle_support_ratio`
+- `selected_bundle_max_internal_gap_px`
+- `remote_interval_rejection_count`
 - whether A/B are on foreground boundaries
 - jump diagnostics from the previous valid frame
 - per-frame timings
@@ -178,9 +205,12 @@ change formal A/B selection.
 Runtime payloads expose coarse request timings and detector-stage timings:
 
 - `load_ms`
+- `frame_load_ms`
 - `detect_ms`
 - `api_total_ms`
 - `preview_encode_ms`
+- `target_fps`
+- `frame_budget_ms`
 - `segmentation_ms`
 - `connected_components_ms`
 - `wire_filtering_ms`
@@ -193,17 +223,28 @@ Runtime payloads expose coarse request timings and detector-stage timings:
 
 `api_total_ms` covers the `/next` request path and does not include the browser's
 subsequent image fetch. `preview_encode_ms` comes from the `preview.png` endpoint.
-If `detect_ms` is larger than the frame interval implied by target FPS, playback
-is detector-limited and measured FPS will be lower than target FPS.
+The Run page compares timings to `frame_budget_ms = 1000 / target_fps`:
+
+- `detect_ms > 0.8 * frame_budget_ms` shows detector-limited,
+- `preview_encode_ms > 0.3 * frame_budget_ms` shows preview-limited,
+- `api_total_ms > frame_budget_ms` without detector saturation shows
+  network/api-limited.
+
+If the detector is slower than the budget, measured FPS will be lower than target
+FPS. The warning does not change detector output or the formal A/B contract.
 
 ## Debug Level Policy
 
 Playing uses `debug_level = basic`. Basic mode returns formal detection,
-lightweight diagnostics, vector overlay metadata, and timings. It skips full
-raw/bridged/rejected interval diagnostics and does not generate debug overlay PNGs.
+essential source diagnostics, jump diagnostics, and timings. It skips full
+raw/bridged/selected/rejected interval arrays and does not generate debug overlay PNGs.
+The essential wire source diagnostics are enough to explain formal A/B origin
+without returning full overlay metadata on every playback frame.
 
-Pause, step, seek, and explicit debug inspection may use `debug_level = full`.
-Full debug is for inspection and should not be used as the default playback path.
+Pause, step, seek, and explicit debug inspection use `debug_level = full`.
+Full debug returns selected intervals, rejected remote intervals, source
+intervals, and overlay metadata. Full debug is for inspection and should not be
+used as the default playback path.
 
 ## Drift Diagnostics
 
@@ -233,7 +274,9 @@ the current frame's formal A/B selection.
 4. Select `Live Offline Run`.
 5. Click `Open Live Source`.
 6. Use `Play`, `Pause`, `Step Prev`, `Step Next`, and `Seek`.
-7. Adjust FPS and Loop before opening the session.
+7. Use `Inspect current frame` while paused to request full diagnostics without
+   advancing playback.
+8. Adjust FPS and Loop before opening the session.
 
 The frame preview is downsampled for the browser. Formal ROI and A/B coordinates remain in the original acquisition frame size.
 
@@ -245,6 +288,9 @@ When `valid = true`:
 - draw FORMAL A/B points,
 - draw only the formal A-to-B segment,
 - do not show rejected/debug candidates as formal points.
+- when diagnostics overlay is enabled, draw selected valid intervals, formal
+  source intervals, and full-debug rejected remote intervals as diagnostic
+  overlays only.
 
 When `valid = false`:
 

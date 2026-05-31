@@ -2,6 +2,7 @@ import math
 
 import numpy as np
 import pytest
+import yyt1771_af.vision.wire_strip_detector as wire_strip_detector_module
 from yyt1771_af.core.models import RotatedRoi, SegmentationParams, WireStripDetectorParams
 from yyt1771_af.core.statuses import CoordinateSpace, DetectionStatus, DetectorKind, TargetFamily
 from yyt1771_af.vision.wire_strip_detector import WireStripDetector
@@ -212,6 +213,10 @@ def test_wire_bundle_envelope_returns_outer_boundaries_of_bundle_intervals() -> 
     assert result.diagnostics.point_b_on_foreground_boundary is True
     assert result.diagnostics.leftmost_valid_interval is not None
     assert result.diagnostics.rightmost_valid_interval is not None
+    assert result.diagnostics.point_a_source_interval == result.diagnostics.leftmost_valid_interval
+    assert result.diagnostics.point_b_source_interval == result.diagnostics.rightmost_valid_interval
+    assert result.diagnostics.point_a_source_interval in result.diagnostics.selected_valid_intervals
+    assert result.diagnostics.point_b_source_interval in result.diagnostics.selected_valid_intervals
     a_local = _local_coordinates(result.point_a.x, result.point_a.y, roi)
     b_local = _local_coordinates(result.point_b.x, result.point_b.y, roi)
     assert abs(a_local[1] - b_local[1]) <= 1.0
@@ -523,9 +528,54 @@ def test_wire_bundle_envelope_rejects_high_contrast_remote_interval_as_b() -> No
     assert result.diagnostics.rejected_remote_intervals[-1].start_local_x == pytest.approx(
         252.0, abs=2.0
     )
+    assert result.diagnostics.point_b_source_interval is not None
+    assert (
+        result.diagnostics.point_b_source_interval
+        not in result.diagnostics.rejected_remote_intervals
+    )
     assert result.diagnostics.remote_interval_rejection_count == 1
     assert result.diagnostics.rejected_remote_interval_reasons is not None
     assert "remote_gap_exceeded" in result.diagnostics.rejected_remote_interval_reasons
+
+
+def test_wire_invariant_failure_preserves_source_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    detector = WireStripDetector()
+    roi = RotatedRoi(center_x=120.0, center_y=90.0, width=130.0, height=90.0, angle_deg=0.0)
+    frame = _wire_bundle_frame(roi)
+
+    monkeypatch.setattr(
+        wire_strip_detector_module,
+        "_source_boundary_on_foreground",
+        lambda *args, **kwargs: False,
+    )
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.valid is False
+    assert result.status is DetectionStatus.COORDINATE_MAPPING_ERROR
+    assert result.point_a is None
+    assert result.point_b is None
+    assert result.distance_px is None
+    assert result.diagnostics.point_a_source_interval is not None
+    assert result.diagnostics.point_b_source_interval is not None
+    assert result.diagnostics.selected_bundle_cluster_id is not None
+    assert result.diagnostics.selected_bundle_support_ratio is not None
+    assert result.diagnostics.message is not None
+    assert "point_a_not_foreground_boundary" in result.diagnostics.message
 
 
 def test_wire_filtering_params_can_intentionally_allow_low_contrast_patch() -> None:

@@ -207,9 +207,7 @@ def connected_components(
         if area < min_area_px:
             continue
         first_pixel_rowmajor = int(rows[start]) * width + int(cols[start])
-        coordinates_array = np.column_stack(
-            (rows[start:end], cols[start:end])
-        ).astype(np.int32)
+        coordinates_array = np.column_stack((rows[start:end], cols[start:end])).astype(np.int32)
         raw_components.append((area, first_pixel_rowmajor, coordinates_array))
 
     raw_components.sort(key=lambda item: (-item[0], item[1]))

@@ -68,17 +68,34 @@ export function FrameCanvas({
   const activeFrameRef = frameRef;
   const roiRect = roiToOverlayRect(roi);
   const handles = roiHandlePoints(roi);
-  const pointA = detection?.point_a ? pointToOverlayCircle(detection.point_a) : null;
-  const pointB = detection?.point_b ? pointToOverlayCircle(detection.point_b) : null;
+  const pointA =
+    detection?.valid === true && detection.point_a ? pointToOverlayCircle(detection.point_a) : null;
+  const pointB =
+    detection?.valid === true && detection.point_b ? pointToOverlayCircle(detection.point_b) : null;
   const selectedIntervalSegments =
-    detection?.valid === true
+    showDiagnosticsOverlay && detection?.valid === true
       ? diagnosticIntervalsToSegments(detection.diagnostics.selected_valid_intervals, roi)
       : [];
   const rejectedIntervalSegments =
-    detection !== null
+    showDiagnosticsOverlay && detection !== null
       ? [
           ...diagnosticIntervalsToSegments(detection.diagnostics.rejected_intervals, roi),
           ...diagnosticIntervalsToSegments(detection.diagnostics.rejected_remote_intervals, roi),
+        ]
+      : [];
+  const sourceIntervalSegments =
+    showDiagnosticsOverlay && detection?.valid === true
+      ? [
+          ...diagnosticIntervalToSegments(
+            detection.diagnostics.point_a_source_interval ??
+              detection.diagnostics.formal_point_a_source_interval,
+            roi,
+          ),
+          ...diagnosticIntervalToSegments(
+            detection.diagnostics.point_b_source_interval ??
+              detection.diagnostics.formal_point_b_source_interval,
+            roi,
+          ),
         ]
       : [];
   const rejectedA =
@@ -218,8 +235,19 @@ export function FrameCanvas({
         ))}
         {selectedIntervalSegments.map((segment, index) => (
           <line
-            className="selected-interval-segment"
+            className="selected-interval-segment selected-bundle-cluster-segment"
             key={`${segment.x1}-${segment.y1}-${index}`}
+            vectorEffect="non-scaling-stroke"
+            x1={segment.x1}
+            x2={segment.x2}
+            y1={segment.y1}
+            y2={segment.y2}
+          />
+        ))}
+        {sourceIntervalSegments.map((segment, index) => (
+          <line
+            className="source-interval-segment"
+            key={`src-${segment.x1}-${segment.y1}-${index}`}
             vectorEffect="non-scaling-stroke"
             x1={segment.x1}
             x2={segment.x2}
@@ -323,6 +351,16 @@ function diagnosticIntervalsToSegments(
     const end = localPointToAcquisition(roi, interval.end_local_x, interval.line_y);
     return [{ x1: start.x, y1: start.y, x2: end.x, y2: end.y }];
   });
+}
+
+function diagnosticIntervalToSegments(
+  value: unknown,
+  roi: RotatedRoi,
+): Array<{ x1: number; y1: number; x2: number; y2: number }> {
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+  return diagnosticIntervalsToSegments([value], roi);
 }
 
 function measurementLineSegment(

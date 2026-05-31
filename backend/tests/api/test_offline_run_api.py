@@ -243,6 +243,33 @@ def test_offline_run_wire_strip_uses_wire_bundle_envelope(tmp_path: Path) -> Non
     frame = client.post(f"/api/offline-run/{session_id}/next").json()
     diagnostics = frame["detection"]["diagnostics"]
     assert diagnostics["measurement_mode"] == "wire_bundle_envelope"
+    assert diagnostics["point_a_source_interval"] is not None
+    assert diagnostics["point_b_source_interval"] is not None
+    assert diagnostics["selected_bundle_cluster_id"] is not None
+    assert diagnostics["selected_bundle_support_ratio"] is not None
+    assert diagnostics["selected_bundle_max_internal_gap_px"] is not None
+    assert diagnostics["remote_interval_rejection_count"] == 0
+    assert "selected_valid_intervals" not in diagnostics
+    assert "rejected_remote_intervals" not in diagnostics
+
+    inspected = client.post(f"/api/offline-run/{session_id}/inspect").json()
+    inspected_diagnostics = inspected["detection"]["diagnostics"]
+    assert (
+        inspected_diagnostics["point_a_source_interval"]
+        in inspected_diagnostics["selected_valid_intervals"]
+    )
+    assert (
+        inspected_diagnostics["point_b_source_interval"]
+        in inspected_diagnostics["selected_valid_intervals"]
+    )
+    assert (
+        inspected_diagnostics["point_a_source_interval"]
+        == inspected_diagnostics["leftmost_valid_interval"]
+    )
+    assert (
+        inspected_diagnostics["point_b_source_interval"]
+        == inspected_diagnostics["rightmost_valid_interval"]
+    )
     assert "two_strip" not in json.dumps(diagnostics)
 
 
@@ -409,9 +436,11 @@ def test_offline_run_next_reports_timing_and_uses_basic_debug_level(tmp_path: Pa
     seeked = client.post(f"/api/offline-run/{session_id}/seek", json={"frame_index": 0}).json()
 
     runtime = played["runtime"]
-    for key in ("load_ms", "detect_ms", "api_total_ms"):
+    for key in ("load_ms", "frame_load_ms", "detect_ms", "api_total_ms"):
         assert isinstance(runtime[key], (int, float))
         assert runtime[key] >= 0.0
+    assert runtime["target_fps"] == 10.0
+    assert runtime["frame_budget_ms"] == 100.0
     assert "preview_encode_ms" in runtime
     for key in (
         "segmentation_ms",
@@ -436,7 +465,39 @@ def test_offline_run_next_reports_timing_and_uses_basic_debug_level(tmp_path: Pa
     # Serialized diagnostics drop None fields, so the basic playback frame omits
     # the heavy raw intervals while the full seek frame includes them.
     assert "raw_intervals" not in played["detection"]["diagnostics"]
+    assert "selected_valid_intervals" not in played["detection"]["diagnostics"]
+    assert "rejected_remote_intervals" not in played["detection"]["diagnostics"]
     assert seeked["detection"]["diagnostics"]["raw_intervals"] is not None
+
+
+def test_offline_run_inspect_current_frame_returns_full_debug_without_advancing(
+    tmp_path: Path,
+) -> None:
+    frames_dir = tmp_path / "wire_frames"
+    frames_dir.mkdir()
+    np.save(frames_dir / "frame_000001.npy", _wire_bundle_frame())
+    np.save(frames_dir / "frame_000002.npy", _wire_bundle_frame())
+    client = TestClient(app)
+    measurement_definition_id = _confirm_wire_definition(client)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+    played = client.post(f"/api/offline-run/{session_id}/next").json()
+
+    inspected = client.post(f"/api/offline-run/{session_id}/inspect").json()
+    next_frame = client.post(f"/api/offline-run/{session_id}/next").json()
+
+    assert inspected["frame_index"] == played["frame_index"]
+    assert inspected["runtime"]["debug_level"] == "full"
+    assert inspected["detection"]["diagnostics"]["raw_intervals"] is not None
+    assert (
+        inspected["detection"]["diagnostics"]["point_a_source_interval"]
+        in inspected["detection"]["diagnostics"]["selected_valid_intervals"]
+    )
+    assert next_frame["frame_index"] == 1
 
 
 def test_offline_run_close_makes_session_unavailable(tmp_path: Path) -> None:
@@ -559,10 +620,10 @@ def test_offline_run_invalid_detection_is_not_api_error(tmp_path: Path) -> None:
 def test_offline_run_trace_records_success_and_error_frames(tmp_path: Path) -> None:
     frames_dir = tmp_path / "frames"
     frames_dir.mkdir()
-    _write_frame(frames_dir / "frame_000001.npy")
+    np.save(frames_dir / "frame_000001.npy", _wire_bundle_frame())
     _write_bad_color_frame(frames_dir / "frame_000002.npy")
     client = TestClient(app, raise_server_exceptions=False)
-    measurement_definition_id = _confirm_definition(client)
+    measurement_definition_id = _confirm_wire_definition(client)
     opened = _open_live_run(
         client,
         frames_dir=frames_dir,
@@ -583,6 +644,12 @@ def test_offline_run_trace_records_success_and_error_frames(tmp_path: Path) -> N
     assert [item["frame_index"] for item in traces] == [0, 1]
     assert traces[0]["valid"] is True
     assert traces[0]["error_code"] is None
+    assert traces[0]["point_a_source_interval"] is not None
+    assert traces[0]["point_b_source_interval"] is not None
+    assert traces[0]["selected_bundle_support_ratio"] is not None
+    assert traces[0]["selected_bundle_max_internal_gap_px"] is not None
+    assert "frame_load_ms" in traces[0]["timings_ms"]
+    assert "detector_total_ms" in traces[0]["timings_ms"]
     assert traces[1]["valid"] is False
     assert traces[1]["error_code"] in {"frame_read_failed", "unsupported_frame_format"}
     assert traces[1]["frame_name"] == "frame_000002.npy"

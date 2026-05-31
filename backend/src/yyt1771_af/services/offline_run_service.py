@@ -124,10 +124,14 @@ class OfflineRunTraceEntry(BaseModel):
     distance_px: float | None = None
     measurement_line_y: float | None = None
     formal_ab_span_px: float | None = None
+    point_a_source_interval: dict[str, float | None] | None = None
+    point_b_source_interval: dict[str, float | None] | None = None
     selected_valid_intervals: list[dict[str, float | None]] | None = None
     rejected_remote_intervals: list[dict[str, float | None]] | None = None
     selected_bundle_cluster_id: int | None = None
     selected_bundle_outer_span_px: float | None = None
+    selected_bundle_support_ratio: float | None = None
+    selected_bundle_max_internal_gap_px: float | None = None
     max_bundle_internal_gap_px: float | None = None
     remote_interval_rejection_count: int | None = None
     point_a: dict[str, Any] | None = None
@@ -308,6 +312,16 @@ class OfflineRunService:
             session.next_frame_index = frame_index + 1
         return response
 
+    def inspect(self, session_id: str) -> OfflineRunFrameResponse:
+        session = self._require_session(session_id)
+        return self._frame_response_or_error(
+            session,
+            session.current_frame_index,
+            end_of_stream=session.end_of_stream,
+            debug_level="full",
+            operation="inspect",
+        )
+
     def previous(self, session_id: str) -> OfflineRunFrameResponse:
         session = self._require_session(session_id)
         if session.current_frame_index <= 0:
@@ -481,6 +495,8 @@ class OfflineRunService:
             "recipe_locked": True,
             "source_type": "offline",
             "fps": session.fps,
+            "target_fps": session.fps,
+            "frame_budget_ms": round(1000.0 / session.fps, 3),
             "loop": session.loop,
             "frame_index": frame_index,
             "frame_name": frame.frame_name,
@@ -488,6 +504,7 @@ class OfflineRunService:
             "total_duration_s": _total_duration_s(session),
             "debug_level": debug_level,
             "load_ms": load_ms,
+            "frame_load_ms": load_ms,
             "detect_ms": detect_ms,
             "preview_encode_ms": session.last_preview_encode_ms,
             "api_total_ms": round((time.perf_counter() - api_start) * 1000.0, 3),
@@ -717,6 +734,14 @@ class OfflineRunService:
                 distance_px=_optional_float(detection.get("distance_px")),
                 measurement_line_y=_optional_float(diagnostics.get("measurement_line_y")),
                 formal_ab_span_px=_optional_float(diagnostics.get("formal_ab_span_px")),
+                point_a_source_interval=_single_interval_summary(
+                    diagnostics.get("point_a_source_interval")
+                    or diagnostics.get("formal_point_a_source_interval")
+                ),
+                point_b_source_interval=_single_interval_summary(
+                    diagnostics.get("point_b_source_interval")
+                    or diagnostics.get("formal_point_b_source_interval")
+                ),
                 selected_valid_intervals=_interval_summary(
                     diagnostics.get("selected_valid_intervals")
                 ),
@@ -728,6 +753,12 @@ class OfflineRunService:
                 ),
                 selected_bundle_outer_span_px=_optional_float(
                     diagnostics.get("selected_bundle_outer_span_px")
+                ),
+                selected_bundle_support_ratio=_optional_float(
+                    diagnostics.get("selected_bundle_support_ratio")
+                ),
+                selected_bundle_max_internal_gap_px=_optional_float(
+                    diagnostics.get("selected_bundle_max_internal_gap_px")
                 ),
                 max_bundle_internal_gap_px=_optional_float(
                     diagnostics.get("max_bundle_internal_gap_px")
@@ -855,15 +886,23 @@ def _interval_summary(value: Any) -> list[dict[str, float | None]] | None:
     for item in value:
         if not isinstance(item, dict):
             continue
-        intervals.append(
-            {
-                "start_local_x": _optional_float(item.get("start_local_x")),
-                "end_local_x": _optional_float(item.get("end_local_x")),
-                "width_px": _optional_float(item.get("width_px")),
-                "line_y": _optional_float(item.get("line_y")),
-            }
-        )
+        intervals.append(_interval_payload(item))
     return intervals
+
+
+def _single_interval_summary(value: Any) -> dict[str, float | None] | None:
+    if not isinstance(value, dict):
+        return None
+    return _interval_payload(value)
+
+
+def _interval_payload(item: dict[str, Any]) -> dict[str, float | None]:
+    return {
+        "start_local_x": _optional_float(item.get("start_local_x")),
+        "end_local_x": _optional_float(item.get("end_local_x")),
+        "width_px": _optional_float(item.get("width_px")),
+        "line_y": _optional_float(item.get("line_y")),
+    }
 
 
 def _diagnostic_timing_payload(diagnostics: DetectionDiagnostics) -> dict[str, float]:

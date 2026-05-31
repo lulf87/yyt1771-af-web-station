@@ -98,11 +98,15 @@ def test_balloon_crop_offset_keeps_ab_inside_roi_and_matches_uncropped() -> None
     )
 
     reference = detector.detect(
-        frame=small_frame, roi=small_roi, segmentation=_balloon_segmentation(),
+        frame=small_frame,
+        roi=small_roi,
+        segmentation=_balloon_segmentation(),
         params=BalloonEnvelopeDetectorParams(),
     )
     cropped = detector.detect(
-        frame=big_frame, roi=big_roi, segmentation=_balloon_segmentation(),
+        frame=big_frame,
+        roi=big_roi,
+        segmentation=_balloon_segmentation(),
         params=BalloonEnvelopeDetectorParams(),
     )
 
@@ -137,11 +141,15 @@ def test_wire_crop_offset_keeps_ab_inside_roi_and_matches_uncropped() -> None:
     )
 
     reference = detector.detect(
-        frame=small_frame, roi=small_roi, segmentation=_wire_segmentation(),
+        frame=small_frame,
+        roi=small_roi,
+        segmentation=_wire_segmentation(),
         params=WireStripDetectorParams(),
     )
     cropped = detector.detect(
-        frame=big_frame, roi=big_roi, segmentation=_wire_segmentation(),
+        frame=big_frame,
+        roi=big_roi,
+        segmentation=_wire_segmentation(),
         params=WireStripDetectorParams(),
     )
 
@@ -167,12 +175,16 @@ def test_balloon_detection_identical_with_numpy_fallback(monkeypatch) -> None:
     frame = _ellipse_frame()
     roi = RotatedRoi(center_x=120.0, center_y=90.0, width=150.0, height=90.0, angle_deg=0.0)
     scipy_result = detector.detect(
-        frame=frame, roi=roi, segmentation=_balloon_segmentation(),
+        frame=frame,
+        roi=roi,
+        segmentation=_balloon_segmentation(),
         params=BalloonEnvelopeDetectorParams(),
     )
     monkeypatch.setattr(morphology, "_ndimage", None)
     numpy_result = detector.detect(
-        frame=frame, roi=roi, segmentation=_balloon_segmentation(),
+        frame=frame,
+        roi=roi,
+        segmentation=_balloon_segmentation(),
         params=BalloonEnvelopeDetectorParams(),
     )
     _assert_same_formal_result(scipy_result, numpy_result)

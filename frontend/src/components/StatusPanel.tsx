@@ -74,6 +74,10 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
   const diagnosticPointSuffix = detection.valid ? undefined : "rejected/debug";
   const rejectedA = pointLike(diagnostics.rejected_candidate_point_a, "rejected/debug");
   const rejectedB = pointLike(diagnostics.rejected_candidate_point_b, "rejected/debug");
+  const pointASourceInterval =
+    diagnostics.point_a_source_interval ?? diagnostics.formal_point_a_source_interval;
+  const pointBSourceInterval =
+    diagnostics.point_b_source_interval ?? diagnostics.formal_point_b_source_interval;
   const rows = [
     ["Message", valueText(diagnostics.message)],
     ["Pattern model", valueText(diagnostics.pattern_model)],
@@ -108,8 +112,8 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
     ["Selected bundle cluster", valueText(diagnostics.selected_bundle_cluster_id)],
     ["Selected bundle intervals", valueText(diagnostics.selected_bundle_interval_count)],
     ["Selected bundle span", valueText(diagnostics.selected_bundle_outer_span_px)],
-    ["Selected bundle support", valueText(diagnostics.selected_bundle_support_ratio)],
-    ["Selected bundle max gap", valueText(diagnostics.selected_bundle_max_internal_gap_px)],
+    ["Bundle support ratio", valueText(diagnostics.selected_bundle_support_ratio)],
+    ["Max internal gap", valueText(diagnostics.selected_bundle_max_internal_gap_px)],
     ["Max bundle gap threshold", valueText(diagnostics.max_bundle_internal_gap_px)],
     ["Max bundle gap ratio", valueText(diagnostics.max_bundle_internal_gap_ratio)],
     ["Rejected remote intervals", intervalSummary(diagnostics.rejected_remote_intervals)],
@@ -117,7 +121,10 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
       "Rejected remote reasons",
       reasonSummary(diagnostics.rejected_remote_interval_reasons),
     ],
-    ["Remote interval rejections", valueText(diagnostics.remote_interval_rejection_count)],
+    [
+      "Remote interval rejection count",
+      valueText(diagnostics.remote_interval_rejection_count),
+    ],
     ["Local contrast", valueText(diagnostics.local_contrast_score)],
     ["Wire likeness", valueText(diagnostics.wire_likeness_score)],
     ["Component area", valueText(diagnostics.component_area_px ?? diagnostics.selected_component_area_px)],
@@ -138,18 +145,18 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
     ["Rightmost valid interval", intervalSummary(singleInterval(diagnostics.rightmost_valid_interval))],
     [
       "A source interval",
-      intervalSummary(singleInterval(diagnostics.formal_point_a_source_interval)),
+      intervalSummary(singleInterval(pointASourceInterval)),
     ],
     [
       "B source interval",
-      intervalSummary(singleInterval(diagnostics.formal_point_b_source_interval)),
+      intervalSummary(singleInterval(pointBSourceInterval)),
     ],
     ["A on foreground boundary", valueText(diagnostics.point_a_on_foreground_boundary)],
     ["B on foreground boundary", valueText(diagnostics.point_b_on_foreground_boundary)],
     ["A source layer", valueText(diagnostics.point_a_source_layer)],
     ["B source layer", valueText(diagnostics.point_b_source_layer)],
     ["Internal gaps", valueText(diagnostics.internal_gap_count)],
-    ["Max internal gap", valueText(diagnostics.max_internal_gap_px)],
+    ["Line max internal gap", valueText(diagnostics.max_internal_gap_px)],
     ["Bundle outer span", valueText(diagnostics.bundle_outer_span_px ?? diagnostics.mesh_outer_span_px)],
     ["Formal A/B span", valueText(diagnostics.formal_ab_span_px)],
     ["Virtual envelope span", valueText(diagnostics.virtual_envelope_span_px)],

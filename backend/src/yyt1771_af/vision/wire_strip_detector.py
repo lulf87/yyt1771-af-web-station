@@ -293,6 +293,11 @@ class WireStripDetector:
             frame_shape=frame.shape,
             foreground_mask=wire_foreground,
         )
+        invariant_violation = invariant_violation or _wire_source_invariant(
+            selection=selection,
+            roi=roi,
+            foreground=wire_foreground,
+        )
         if invariant_violation is not None:
             return _timed_failure(
                 DetectionStatus.COORDINATE_MAPPING_ERROR,
@@ -300,6 +305,7 @@ class WireStripDetector:
                 contour_area_px=float(np.count_nonzero(foreground)),
                 candidate_components=len(components),
                 diagnostics_extra=component_diagnostics
+                | _selection_diagnostics(selection, include_full=True)
                 | {"message": f"Formal A/B invariant violation: {invariant_violation}"},
             )
 
@@ -322,52 +328,8 @@ class WireStripDetector:
                 "max_local_projection": selection.max_local_projection,
                 "distance_to_left_roi_boundary_px": selection.distance_to_left_roi_boundary_px,
                 "distance_to_right_roi_boundary_px": selection.distance_to_right_roi_boundary_px,
-                "point_a_local": selection.point_a_local,
-                "point_b_local": selection.point_b_local,
-                "measurement_line_y": selection.measurement_line_y,
-                "local_y_delta_px": selection.local_y_delta_px,
-                "parallel_error_px": selection.parallel_error_px,
-                "chord_length_px": selection.chord_length_px,
-                "pattern_model": selection.pattern_model,
-                "detected_pattern": selection.detected_pattern,
-                "object_interval_count": selection.object_interval_count,
-                "interval_count": selection.interval_count,
-                "selected_intervals": selection.selected_intervals,
-                "raw_intervals": selection.raw_intervals,
-                "bridged_intervals": selection.bridged_intervals,
-                "selected_valid_intervals": selection.selected_valid_intervals,
-                "leftmost_valid_interval": selection.leftmost_valid_interval,
-                "rightmost_valid_interval": selection.rightmost_valid_interval,
-                "interval_gaps": selection.interval_gaps,
-                "bundle_cluster_count": selection.bundle_cluster_count,
-                "bundle_clusters": selection.bundle_clusters,
-                "selected_bundle_cluster_id": selection.selected_bundle_cluster_id,
-                "selected_bundle_interval_count": selection.selected_bundle_interval_count,
-                "selected_bundle_outer_span_px": selection.selected_bundle_outer_span_px,
-                "selected_bundle_support_ratio": selection.selected_bundle_support_ratio,
-                "selected_bundle_max_internal_gap_px": (
-                    selection.selected_bundle_max_internal_gap_px
-                ),
-                "max_bundle_internal_gap_px": selection.max_bundle_internal_gap_px,
-                "rejected_remote_intervals": selection.rejected_remote_intervals,
-                "rejected_remote_interval_reasons": selection.rejected_remote_interval_reasons,
-                "remote_interval_rejection_count": selection.remote_interval_rejection_count,
-                "formal_point_a_source_interval": selection.formal_point_a_source_interval,
-                "formal_point_b_source_interval": selection.formal_point_b_source_interval,
-                "point_a_on_foreground_boundary": selection.point_a_on_foreground_boundary,
-                "point_b_on_foreground_boundary": selection.point_b_on_foreground_boundary,
-                "point_a_source_layer": selection.point_a_source_layer,
-                "point_b_source_layer": selection.point_b_source_layer,
-                "internal_gap_count": selection.internal_gap_count,
-                "max_internal_gap_px": selection.max_internal_gap_px,
-                "bundle_outer_span_px": selection.bundle_outer_span_px,
-                "formal_ab_span_px": selection.formal_ab_span_px,
-                "virtual_envelope_span_px": selection.virtual_envelope_span_px,
-                "candidate_line_is_debug_only": selection.candidate_line_is_debug_only,
-                "selected_line_reason": selection.selected_line_reason,
-                "measurement_mode": selection.measurement_mode,
-                "neighbor_line_support": selection.neighbor_line_support,
             }
+            | _selection_diagnostics(selection, include_full=wants_full)
             | (
                 _rejected_interval_diagnostics(
                     foreground=foreground,
@@ -438,6 +400,205 @@ def _wire_likeness_diagnostics(analysis: WireForegroundAnalysis) -> dict[str, ob
             primary.orientation_deviation_deg if primary is not None else None
         ),
     }
+
+
+def _selection_diagnostics(selection: object, *, include_full: bool) -> dict[str, object]:
+    payload = {
+        "point_a_local": getattr(selection, "point_a_local", None),
+        "point_b_local": getattr(selection, "point_b_local", None),
+        "measurement_line_y": getattr(selection, "measurement_line_y", None),
+        "local_y_delta_px": getattr(selection, "local_y_delta_px", None),
+        "parallel_error_px": getattr(selection, "parallel_error_px", None),
+        "chord_length_px": getattr(selection, "chord_length_px", None),
+        "pattern_model": getattr(selection, "pattern_model", None),
+        "detected_pattern": getattr(selection, "detected_pattern", None),
+        "object_interval_count": getattr(selection, "object_interval_count", None),
+        "interval_count": getattr(selection, "interval_count", None),
+        "bundle_cluster_count": getattr(selection, "bundle_cluster_count", None),
+        "selected_bundle_cluster_id": getattr(selection, "selected_bundle_cluster_id", None),
+        "selected_bundle_interval_count": getattr(
+            selection,
+            "selected_bundle_interval_count",
+            None,
+        ),
+        "selected_bundle_outer_span_px": getattr(
+            selection,
+            "selected_bundle_outer_span_px",
+            None,
+        ),
+        "selected_bundle_support_ratio": getattr(
+            selection,
+            "selected_bundle_support_ratio",
+            None,
+        ),
+        "selected_bundle_max_internal_gap_px": getattr(
+            selection,
+            "selected_bundle_max_internal_gap_px",
+            None,
+        ),
+        "max_bundle_internal_gap_px": getattr(selection, "max_bundle_internal_gap_px", None),
+        "remote_interval_rejection_count": getattr(
+            selection,
+            "remote_interval_rejection_count",
+            None,
+        ),
+        "point_a_source_interval": getattr(selection, "point_a_source_interval", None),
+        "point_b_source_interval": getattr(selection, "point_b_source_interval", None),
+        "formal_point_a_source_interval": getattr(
+            selection,
+            "formal_point_a_source_interval",
+            None,
+        ),
+        "formal_point_b_source_interval": getattr(
+            selection,
+            "formal_point_b_source_interval",
+            None,
+        ),
+        "point_a_on_foreground_boundary": getattr(
+            selection,
+            "point_a_on_foreground_boundary",
+            None,
+        ),
+        "point_b_on_foreground_boundary": getattr(
+            selection,
+            "point_b_on_foreground_boundary",
+            None,
+        ),
+        "point_a_source_layer": getattr(selection, "point_a_source_layer", None),
+        "point_b_source_layer": getattr(selection, "point_b_source_layer", None),
+        "internal_gap_count": getattr(selection, "internal_gap_count", None),
+        "max_internal_gap_px": getattr(selection, "max_internal_gap_px", None),
+        "bundle_outer_span_px": getattr(selection, "bundle_outer_span_px", None),
+        "formal_ab_span_px": getattr(selection, "formal_ab_span_px", None),
+        "candidate_line_is_debug_only": getattr(selection, "candidate_line_is_debug_only", None),
+        "selected_line_reason": getattr(selection, "selected_line_reason", None),
+        "measurement_mode": getattr(selection, "measurement_mode", None),
+        "neighbor_line_support": getattr(selection, "neighbor_line_support", None),
+    }
+    if include_full:
+        payload |= {
+            "selected_intervals": getattr(selection, "selected_intervals", None),
+            "raw_intervals": getattr(selection, "raw_intervals", None),
+            "bridged_intervals": getattr(selection, "bridged_intervals", None),
+            "selected_valid_intervals": getattr(selection, "selected_valid_intervals", None),
+            "leftmost_valid_interval": getattr(selection, "leftmost_valid_interval", None),
+            "rightmost_valid_interval": getattr(selection, "rightmost_valid_interval", None),
+            "interval_gaps": getattr(selection, "interval_gaps", None),
+            "bundle_clusters": getattr(selection, "bundle_clusters", None),
+            "rejected_remote_intervals": getattr(selection, "rejected_remote_intervals", None),
+            "rejected_remote_interval_reasons": getattr(
+                selection,
+                "rejected_remote_interval_reasons",
+                None,
+            ),
+            "mesh_outer_span_px": getattr(selection, "mesh_outer_span_px", None),
+            "virtual_envelope_span_px": getattr(selection, "virtual_envelope_span_px", None),
+        }
+    else:
+        payload |= {
+            "selected_intervals": None,
+            "raw_intervals": None,
+            "bridged_intervals": None,
+            "selected_valid_intervals": None,
+            "leftmost_valid_interval": None,
+            "rightmost_valid_interval": None,
+            "interval_gaps": None,
+            "bundle_clusters": None,
+            "rejected_remote_intervals": None,
+            "rejected_remote_interval_reasons": None,
+            "mesh_outer_span_px": None,
+            "virtual_envelope_span_px": None,
+        }
+    return payload
+
+
+def _wire_source_invariant(
+    *,
+    selection: object,
+    roi: RotatedRoi,
+    foreground: np.ndarray,
+    tolerance_px: float = 1.0,
+) -> str | None:
+    if getattr(selection, "measurement_mode", None) != "wire_bundle_envelope":
+        return None
+    point_a_local = getattr(selection, "point_a_local", None)
+    point_b_local = getattr(selection, "point_b_local", None)
+    point_a_source = getattr(selection, "point_a_source_interval", None) or getattr(
+        selection, "formal_point_a_source_interval", None
+    )
+    point_b_source = getattr(selection, "point_b_source_interval", None) or getattr(
+        selection, "formal_point_b_source_interval", None
+    )
+    selected_intervals = getattr(selection, "selected_valid_intervals", None)
+    rejected_remote = getattr(selection, "rejected_remote_intervals", None) or []
+    if point_a_local is None or point_b_local is None:
+        return "wire_source_local_point_missing"
+    if point_a_source is None or point_b_source is None:
+        return "wire_source_interval_missing"
+    if not isinstance(selected_intervals, list) or not selected_intervals:
+        return "wire_selected_intervals_missing"
+    if point_a_source not in selected_intervals:
+        return "point_a_source_not_selected_interval"
+    if point_b_source not in selected_intervals:
+        return "point_b_source_not_selected_interval"
+    if point_a_source in rejected_remote:
+        return "point_a_source_is_rejected_interval"
+    if point_b_source in rejected_remote:
+        return "point_b_source_is_rejected_interval"
+    if getattr(point_a_source, "rejected", False):
+        return "point_a_source_marked_rejected"
+    if getattr(point_b_source, "rejected", False):
+        return "point_b_source_marked_rejected"
+    measurement_line_y = getattr(selection, "measurement_line_y", None)
+    if not isinstance(measurement_line_y, int | float):
+        return "wire_measurement_line_missing"
+    if abs(point_a_local.y - measurement_line_y) > tolerance_px:
+        return "point_a_not_on_measurement_line"
+    if abs(point_b_local.y - measurement_line_y) > tolerance_px:
+        return "point_b_not_on_measurement_line"
+    local_y_delta = getattr(selection, "local_y_delta_px", 0.0)
+    if isinstance(local_y_delta, int | float) and abs(local_y_delta) > tolerance_px:
+        return "local_y_delta_exceeds_tolerance"
+    parallel_error = getattr(selection, "parallel_error_px", 0.0)
+    if isinstance(parallel_error, int | float) and abs(parallel_error) > tolerance_px:
+        return "parallel_error_exceeds_tolerance"
+    if abs(point_a_local.x - point_a_source.start_local_x) > tolerance_px:
+        return "point_a_not_source_left_boundary"
+    if abs(point_b_local.x - point_b_source.end_local_x) > tolerance_px:
+        return "point_b_not_source_right_boundary"
+    if not _source_boundary_on_foreground(
+        foreground,
+        roi,
+        point_a_source.start_local_x,
+        measurement_line_y,
+        outside_direction=-1.0,
+    ):
+        return "point_a_not_foreground_boundary"
+    if not _source_boundary_on_foreground(
+        foreground,
+        roi,
+        point_b_source.end_local_x,
+        measurement_line_y,
+        outside_direction=1.0,
+    ):
+        return "point_b_not_foreground_boundary"
+    return None
+
+
+def _source_boundary_on_foreground(
+    foreground: np.ndarray,
+    roi: RotatedRoi,
+    local_x: float,
+    local_y: float,
+    *,
+    outside_direction: float,
+) -> bool:
+    if not _point_in_mask(foreground, roi, local_x, local_y):
+        return False
+    outside_x = local_x + outside_direction
+    if outside_x < -roi.width / 2.0 or outside_x > roi.width / 2.0:
+        return False
+    return not _point_in_mask(foreground, roi, outside_x, local_y)
 
 
 def _rejected_interval_diagnostics(
@@ -578,6 +739,8 @@ def _contact_diagnostics(contact_debug: object) -> dict[str, object]:
         "rejected_remote_intervals": contact_debug.rejected_remote_intervals,
         "rejected_remote_interval_reasons": contact_debug.rejected_remote_interval_reasons,
         "remote_interval_rejection_count": contact_debug.remote_interval_rejection_count,
+        "point_a_source_interval": contact_debug.point_a_source_interval,
+        "point_b_source_interval": contact_debug.point_b_source_interval,
         "formal_point_a_source_interval": contact_debug.formal_point_a_source_interval,
         "formal_point_b_source_interval": contact_debug.formal_point_b_source_interval,
         "point_a_on_foreground_boundary": contact_debug.point_a_on_foreground_boundary,

@@ -130,6 +130,8 @@ class ContactSelection:
     rejected_remote_intervals: list[ObjectInterval] | None = None
     rejected_remote_interval_reasons: list[str] | None = None
     remote_interval_rejection_count: int | None = None
+    point_a_source_interval: ObjectInterval | None = None
+    point_b_source_interval: ObjectInterval | None = None
     formal_point_a_source_interval: ObjectInterval | None = None
     formal_point_b_source_interval: ObjectInterval | None = None
     point_a_on_foreground_boundary: bool | None = None
@@ -188,6 +190,8 @@ class ContactDebug:
     rejected_remote_intervals: list[ObjectInterval] | None = None
     rejected_remote_interval_reasons: list[str] | None = None
     remote_interval_rejection_count: int | None = None
+    point_a_source_interval: ObjectInterval | None = None
+    point_b_source_interval: ObjectInterval | None = None
     formal_point_a_source_interval: ObjectInterval | None = None
     formal_point_b_source_interval: ObjectInterval | None = None
     point_a_on_foreground_boundary: bool | None = None
@@ -255,6 +259,8 @@ class _LineCandidate:
     rejected_remote_intervals: list[ObjectInterval] | None = None
     rejected_remote_interval_reasons: list[str] | None = None
     remote_interval_rejection_count: int | None = None
+    point_a_source_interval: ObjectInterval | None = None
+    point_b_source_interval: ObjectInterval | None = None
     formal_point_a_source_interval: ObjectInterval | None = None
     formal_point_b_source_interval: ObjectInterval | None = None
     point_a_on_foreground_boundary: bool | None = None
@@ -839,6 +845,8 @@ def valid_result(
             rejected_remote_intervals=selection.rejected_remote_intervals,
             rejected_remote_interval_reasons=selection.rejected_remote_interval_reasons,
             remote_interval_rejection_count=selection.remote_interval_rejection_count,
+            point_a_source_interval=selection.point_a_source_interval,
+            point_b_source_interval=selection.point_b_source_interval,
             formal_point_a_source_interval=selection.formal_point_a_source_interval,
             formal_point_b_source_interval=selection.formal_point_b_source_interval,
             point_a_on_foreground_boundary=selection.point_a_on_foreground_boundary,
@@ -1132,25 +1140,10 @@ def _bundle_clusters(
     if current:
         clusters.append(current)
 
-    annotated_clusters: list[_BundleCluster] = []
-    interval_index = 0
-    for cluster_id, cluster in enumerate(clusters):
-        annotated_intervals: list[ObjectInterval] = []
-        for interval in cluster:
-            gap_to_previous = gaps[interval_index - 1] if interval_index > 0 else None
-            annotated_intervals.append(
-                interval.model_copy(
-                    update={
-                        "cluster_id": cluster_id,
-                        "gap_to_previous_px": gap_to_previous,
-                    }
-                )
-            )
-            interval_index += 1
-        annotated_clusters.append(
-            _make_bundle_cluster(cluster_id=cluster_id, intervals=annotated_intervals)
-        )
-    return annotated_clusters, gaps
+    return [
+        _make_bundle_cluster(cluster_id=cluster_id, intervals=cluster)
+        for cluster_id, cluster in enumerate(clusters)
+    ], gaps
 
 
 def _make_bundle_cluster(cluster_id: int, intervals: list[ObjectInterval]) -> _BundleCluster:
@@ -1451,6 +1444,8 @@ def _build_mesh_outer_span_candidate(
         rejected_remote_intervals=rejected_remote or None,
         rejected_remote_interval_reasons=rejected_remote_reasons or None,
         remote_interval_rejection_count=len(rejected_remote),
+        point_a_source_interval=leftmost,
+        point_b_source_interval=rightmost,
         formal_point_a_source_interval=leftmost,
         formal_point_b_source_interval=rightmost,
         point_a_on_foreground_boundary=True,
@@ -1524,6 +1519,8 @@ def _candidate_from_local_span(
     rejected_remote_intervals: list[ObjectInterval] | None = None,
     rejected_remote_interval_reasons: list[str] | None = None,
     remote_interval_rejection_count: int | None = None,
+    point_a_source_interval: ObjectInterval | None = None,
+    point_b_source_interval: ObjectInterval | None = None,
     formal_point_a_source_interval: ObjectInterval | None = None,
     formal_point_b_source_interval: ObjectInterval | None = None,
     point_a_on_foreground_boundary: bool | None = None,
@@ -1587,6 +1584,8 @@ def _candidate_from_local_span(
         rejected_remote_intervals=rejected_remote_intervals,
         rejected_remote_interval_reasons=rejected_remote_interval_reasons,
         remote_interval_rejection_count=remote_interval_rejection_count,
+        point_a_source_interval=point_a_source_interval,
+        point_b_source_interval=point_b_source_interval,
         formal_point_a_source_interval=formal_point_a_source_interval,
         formal_point_b_source_interval=formal_point_b_source_interval,
         point_a_on_foreground_boundary=point_a_on_foreground_boundary,
@@ -1683,6 +1682,8 @@ def _replace_rejected_side(candidate: _LineCandidate, rejected_side: str | None)
         rejected_remote_intervals=candidate.rejected_remote_intervals,
         rejected_remote_interval_reasons=candidate.rejected_remote_interval_reasons,
         remote_interval_rejection_count=candidate.remote_interval_rejection_count,
+        point_a_source_interval=candidate.point_a_source_interval,
+        point_b_source_interval=candidate.point_b_source_interval,
         formal_point_a_source_interval=candidate.formal_point_a_source_interval,
         formal_point_b_source_interval=candidate.formal_point_b_source_interval,
         point_a_on_foreground_boundary=candidate.point_a_on_foreground_boundary,
@@ -1743,6 +1744,8 @@ def _candidate_to_selection(candidate: _LineCandidate) -> ContactSelection:
         rejected_remote_intervals=candidate.rejected_remote_intervals,
         rejected_remote_interval_reasons=candidate.rejected_remote_interval_reasons,
         remote_interval_rejection_count=candidate.remote_interval_rejection_count,
+        point_a_source_interval=candidate.point_a_source_interval,
+        point_b_source_interval=candidate.point_b_source_interval,
         formal_point_a_source_interval=candidate.formal_point_a_source_interval,
         formal_point_b_source_interval=candidate.formal_point_b_source_interval,
         point_a_on_foreground_boundary=candidate.point_a_on_foreground_boundary,
@@ -1804,6 +1807,8 @@ def _candidate_to_debug(
         rejected_remote_intervals=candidate.rejected_remote_intervals,
         rejected_remote_interval_reasons=candidate.rejected_remote_interval_reasons,
         remote_interval_rejection_count=candidate.remote_interval_rejection_count,
+        point_a_source_interval=candidate.point_a_source_interval,
+        point_b_source_interval=candidate.point_b_source_interval,
         formal_point_a_source_interval=candidate.formal_point_a_source_interval,
         formal_point_b_source_interval=candidate.formal_point_b_source_interval,
         point_a_on_foreground_boundary=candidate.point_a_on_foreground_boundary,
@@ -1864,6 +1869,8 @@ def _chord_debug(
     rejected_remote_intervals: list[ObjectInterval] | None = None,
     rejected_remote_interval_reasons: list[str] | None = None,
     remote_interval_rejection_count: int | None = None,
+    point_a_source_interval: ObjectInterval | None = None,
+    point_b_source_interval: ObjectInterval | None = None,
     formal_point_a_source_interval: ObjectInterval | None = None,
     formal_point_b_source_interval: ObjectInterval | None = None,
     point_a_on_foreground_boundary: bool | None = None,
@@ -1923,6 +1930,8 @@ def _chord_debug(
         rejected_remote_intervals=rejected_remote_intervals,
         rejected_remote_interval_reasons=rejected_remote_interval_reasons,
         remote_interval_rejection_count=remote_interval_rejection_count,
+        point_a_source_interval=point_a_source_interval,
+        point_b_source_interval=point_b_source_interval,
         formal_point_a_source_interval=formal_point_a_source_interval,
         formal_point_b_source_interval=formal_point_b_source_interval,
         point_a_on_foreground_boundary=point_a_on_foreground_boundary,

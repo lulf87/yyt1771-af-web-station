@@ -25,8 +25,8 @@ describe("StatusPanel debug diagnostics", () => {
         parallel_error_px: 0,
         chord_length_px: 98,
         object_interval_count: 1,
-        formal_point_a_source_interval: { start_local_x: -49, end_local_x: -41, width_px: 8 },
-        formal_point_b_source_interval: { start_local_x: 41, end_local_x: 49, width_px: 8 },
+        point_a_source_interval: { start_local_x: -49, end_local_x: -41, width_px: 8 },
+        point_b_source_interval: { start_local_x: 41, end_local_x: 49, width_px: 8 },
         point_a_on_foreground_boundary: true,
         point_b_on_foreground_boundary: true,
         point_a_source_layer: "bridged_foreground",
@@ -212,10 +212,12 @@ describe("StatusPanel debug diagnostics", () => {
     expect(markup).toContain("Interval gaps");
     expect(markup).toContain("Bundle clusters");
     expect(markup).toContain("Selected bundle cluster");
+    expect(markup).toContain("Bundle support ratio");
+    expect(markup).toContain("Max internal gap");
     expect(markup).toContain("Max bundle gap threshold");
     expect(markup).toContain("Rejected remote intervals");
     expect(markup).toContain("remote_gap_exceeded");
-    expect(markup).toContain("Remote interval rejections");
+    expect(markup).toContain("Remote interval rejection count");
     expect(markup).not.toContain("two_strip");
   });
 });

@@ -5,6 +5,7 @@ import {
   closeOfflineRun,
   getRunSamples,
   getRunStatus,
+  inspectOfflineRun,
   nextOfflineRun,
   openOfflineRun,
   previousOfflineRun,
@@ -278,7 +279,7 @@ export function RunPage({
       setLivePreviewError(null);
       setLastSuccessfulLiveFrameIndex(null);
       setFailedLiveFrameIndex(null);
-      const firstFrame = await nextOfflineRun(opened.session_id);
+      const firstFrame = await seekOfflineRun(opened.session_id, opened.current_frame_index);
       markLiveFrameSuccess(firstFrame);
     });
   }
@@ -329,7 +330,43 @@ export function RunPage({
   }
 
   async function handleLiveNext() {
-    await advanceLiveNext({ fromPlaybackLoop: false });
+    if (offlineRun === null) {
+      return;
+    }
+    const nextIndex =
+      currentLiveIndex >= maxLiveIndex ? (liveLoop ? 0 : maxLiveIndex) : currentLiveIndex + 1;
+    await handleLiveSeek(nextIndex);
+  }
+
+  async function handleLiveInspect() {
+    if (offlineRun === null) {
+      return;
+    }
+    await runAction("live-inspect", async () => {
+      setIsLivePlaying(false);
+      liveNextAbortControllerRef.current?.abort();
+      markLiveFrameSuccess(await inspectOfflineRun(offlineRun.session_id));
+    });
+  }
+
+  async function handleLivePlayPause() {
+    if (offlineRun === null) {
+      return;
+    }
+    if (!isLivePlaying) {
+      setLiveApiError(null);
+      setLivePreviewError(null);
+      setError(null);
+      setLiveFrameIntervalMs(null);
+      setIsLivePlaying(true);
+      return;
+    }
+    await runAction("live-pause", async () => {
+      setIsLivePlaying(false);
+      liveNextAbortControllerRef.current?.abort();
+      liveNextAbortControllerRef.current = null;
+      markLiveFrameSuccess(await inspectOfflineRun(offlineRun.session_id));
+    });
   }
 
   async function handleLiveSeek(frameIndex: number) {
@@ -607,9 +644,10 @@ export function RunPage({
               onDatasetChange={onDatasetChange}
               onFpsChange={setLiveFps}
               onLoopChange={setLiveLoop}
+              onInspect={handleLiveInspect}
               onNext={handleLiveNext}
               onOpen={handleOpenLive}
-              onPlayPause={() => setIsLivePlaying((value) => !value)}
+              onPlayPause={handleLivePlayPause}
               onPrevious={handleLivePrevious}
               onSeek={handleLiveSeek}
               quality={activeDetection?.quality ?? null}
@@ -674,13 +712,20 @@ function LiveTimingReadout({
   frameIntervalMs: number | null;
 }) {
   const detectMs = runtimeNumber(runtime, "detect_ms");
-  const loadMs = runtimeNumber(runtime, "load_ms");
+  const loadMs = runtimeNumber(runtime, "frame_load_ms") ?? runtimeNumber(runtime, "load_ms");
   const apiTotalMs = runtimeNumber(runtime, "api_total_ms");
   const previewEncodeMs = runtimeNumber(runtime, "preview_encode_ms");
-  const targetFps = runtimeNumber(runtime, "fps");
+  const targetFps = runtimeNumber(runtime, "target_fps") ?? runtimeNumber(runtime, "fps");
+  const frameBudgetMs =
+    runtimeNumber(runtime, "frame_budget_ms") ??
+    (targetFps !== null && targetFps > 0 ? Math.round((1000 / targetFps) * 1000) / 1000 : null);
   const segmentationMs = runtimeNumber(runtime, "segmentation_ms");
+  const connectedComponentsMs = runtimeNumber(runtime, "connected_components_ms");
   const wireFilteringMs = runtimeNumber(runtime, "wire_filtering_ms");
   const lineScanMs = runtimeNumber(runtime, "line_scan_ms");
+  const candidateScoringMs = runtimeNumber(runtime, "candidate_scoring_ms");
+  const diagnosticsMs = runtimeNumber(runtime, "diagnostics_ms");
+  const detectorTotalMs = runtimeNumber(runtime, "detector_total_ms");
   const debugLevel = runtimeString(runtime, "debug_level");
   const measuredFps =
     frameIntervalMs !== null && frameIntervalMs > 0
@@ -690,15 +735,29 @@ function LiveTimingReadout({
     ["Measured fps", measuredFps !== null ? `${measuredFps}` : "N/A"],
     ["Target fps", targetFps !== null ? `${targetFps}` : "N/A"],
     ["Frame interval ms", frameIntervalMs !== null ? `${frameIntervalMs}` : "N/A"],
+    ["Frame budget ms", frameBudgetMs !== null ? `${frameBudgetMs}` : "N/A"],
     ["Detect ms", detectMs !== null ? `${detectMs}` : "N/A"],
     ["Segmentation ms", segmentationMs !== null ? `${segmentationMs}` : "N/A"],
+    [
+      "Connected components ms",
+      connectedComponentsMs !== null ? `${connectedComponentsMs}` : "N/A",
+    ],
     ["Wire filtering ms", wireFilteringMs !== null ? `${wireFilteringMs}` : "N/A"],
     ["Line scan ms", lineScanMs !== null ? `${lineScanMs}` : "N/A"],
+    ["Candidate scoring ms", candidateScoringMs !== null ? `${candidateScoringMs}` : "N/A"],
+    ["Diagnostics ms", diagnosticsMs !== null ? `${diagnosticsMs}` : "N/A"],
+    ["Detector total ms", detectorTotalMs !== null ? `${detectorTotalMs}` : "N/A"],
     ["Frame load ms", loadMs !== null ? `${loadMs}` : "N/A"],
     ["Preview encode ms", previewEncodeMs !== null ? `${previewEncodeMs}` : "N/A"],
     ["API total ms", apiTotalMs !== null ? `${apiTotalMs}` : "N/A"],
     ["Debug level", debugLevel ?? "N/A"],
   ];
+  const detectorLimited =
+    detectMs !== null && frameBudgetMs !== null && detectMs > 0.8 * frameBudgetMs;
+  const previewLimited =
+    previewEncodeMs !== null && frameBudgetMs !== null && previewEncodeMs > 0.3 * frameBudgetMs;
+  const apiLimited =
+    apiTotalMs !== null && frameBudgetMs !== null && apiTotalMs > frameBudgetMs && !detectorLimited;
   return (
     <section className="live-timing" aria-label="Live timing">
       <dl className="metric-list">
@@ -709,9 +768,19 @@ function LiveTimingReadout({
           </div>
         ))}
       </dl>
-      {detectMs !== null && detectMs > 100 ? (
+      {detectorLimited ? (
         <p className="panel-warning">
           Detector is slower than target FPS; playback is detector-limited.
+        </p>
+      ) : null}
+      {previewLimited ? (
+        <p className="panel-warning">
+          Preview encoding is using a large share of the frame budget; playback is preview-limited.
+        </p>
+      ) : null}
+      {apiLimited ? (
+        <p className="panel-warning">
+          API total time exceeds the frame budget; playback is network/api-limited.
         </p>
       ) : null}
     </section>
@@ -817,6 +886,7 @@ function LiveOfflineRunControls({
   onClose,
   onDatasetChange,
   onFpsChange,
+  onInspect,
   onLoopChange,
   onNext,
   onOpen,
@@ -851,6 +921,7 @@ function LiveOfflineRunControls({
   onClose: () => void;
   onDatasetChange: (datasetId: string) => void;
   onFpsChange: (fps: number) => void;
+  onInspect: () => void;
   onLoopChange: (loop: boolean) => void;
   onNext: () => void;
   onOpen: () => void;
@@ -934,6 +1005,11 @@ function LiveOfflineRunControls({
           </button>
           <button disabled={!hasSession || isBusy} onClick={onNext} type="button">
             Step Next
+          </button>
+        </div>
+        <div className="button-row compact">
+          <button disabled={!hasSession || isBusy} onClick={onInspect} type="button">
+            Inspect current frame
           </button>
         </div>
         <label className="range-field">

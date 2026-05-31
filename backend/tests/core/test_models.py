@@ -134,6 +134,32 @@ def test_invalid_detection_result_rejects_distance() -> None:
         )
 
 
+def test_invalid_detection_result_rejects_formal_points() -> None:
+    with pytest.raises(ValidationError):
+        DetectionResult(
+            status=DetectionStatus.TARGET_NOT_FOUND,
+            valid=False,
+            point_a=Point2D(x=1.0, y=2.0),
+            point_b=None,
+            distance_px=None,
+            quality=0.2,
+            target_family=TargetFamily.WIRE_STRIP,
+            diagnostics=DetectionDiagnostics(detector=DetectorKind.WIRE_STRIP_DETECTOR),
+        )
+
+    with pytest.raises(ValidationError):
+        DetectionResult(
+            status=DetectionStatus.TARGET_NOT_FOUND,
+            valid=False,
+            point_a=None,
+            point_b=Point2D(x=4.0, y=6.0),
+            distance_px=None,
+            quality=0.2,
+            target_family=TargetFamily.WIRE_STRIP,
+            diagnostics=DetectionDiagnostics(detector=DetectorKind.WIRE_STRIP_DETECTOR),
+        )
+
+
 def test_invalid_detection_result_rejects_ok_status() -> None:
     with pytest.raises(ValidationError):
         DetectionResult(

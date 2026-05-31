@@ -8,6 +8,7 @@ import {
   downloadRunExport,
   closeOfflineRun,
   getTemperatureStatus,
+  inspectOfflineRun,
   nextOfflineRun,
   openCamera,
   openOfflineRun,
@@ -138,6 +139,7 @@ describe("setup API client", () => {
       max_preview_width: 1200,
     });
     await nextOfflineRun("offline_run_1");
+    await inspectOfflineRun("offline_run_1");
     await seekOfflineRun("offline_run_1", 12);
     await closeOfflineRun("offline_run_1");
 
@@ -164,6 +166,11 @@ describe("setup API client", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
+      "/api/offline-run/offline_run_1/inspect",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
       "/api/offline-run/offline_run_1/seek",
       expect.objectContaining({
         method: "POST",
@@ -171,7 +178,7 @@ describe("setup API client", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
+      5,
       "/api/offline-run/offline_run_1/close",
       expect.objectContaining({ method: "POST" }),
     );

@@ -206,6 +206,12 @@ export async function nextOfflineRun(
   });
 }
 
+export async function inspectOfflineRun(sessionId: string): Promise<OfflineRunFrame> {
+  return requestJson<OfflineRunFrame>(`/api/offline-run/${sessionId}/inspect`, {
+    method: "POST",
+  });
+}
+
 export async function previousOfflineRun(sessionId: string): Promise<OfflineRunFrame> {
   return requestJson<OfflineRunFrame>(`/api/offline-run/${sessionId}/previous`, {
     method: "POST",

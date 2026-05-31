@@ -246,6 +246,12 @@ select {
   opacity: 0.82;
 }
 
+.source-interval-segment {
+  stroke: #0f766e;
+  stroke-width: 6;
+  opacity: 0.95;
+}
+
 .rejected-interval-segment {
   stroke: #f87171;
   stroke-width: 3;

@@ -92,12 +92,18 @@ def test_wire_basic_matches_full_formal_ab_but_skips_heavy_diagnostics() -> None
     frame = _wire_bundle_frame(roi)
 
     full = detector.detect(
-        frame=frame, roi=roi, segmentation=_wire_segmentation(),
-        params=WireStripDetectorParams(), debug_level="full",
+        frame=frame,
+        roi=roi,
+        segmentation=_wire_segmentation(),
+        params=WireStripDetectorParams(),
+        debug_level="full",
     )
     basic = detector.detect(
-        frame=frame, roi=roi, segmentation=_wire_segmentation(),
-        params=WireStripDetectorParams(), debug_level="basic",
+        frame=frame,
+        roi=roi,
+        segmentation=_wire_segmentation(),
+        params=WireStripDetectorParams(),
+        debug_level="basic",
     )
 
     assert full.status is DetectionStatus.OK
@@ -106,6 +112,13 @@ def test_wire_basic_matches_full_formal_ab_but_skips_heavy_diagnostics() -> None
     assert full.diagnostics.raw_intervals is not None
     assert basic.diagnostics.raw_intervals is None
     assert basic.diagnostics.bridged_intervals is None
+    assert full.diagnostics.selected_valid_intervals is not None
+    assert basic.diagnostics.selected_valid_intervals is None
+    assert basic.diagnostics.point_a_source_interval is not None
+    assert basic.diagnostics.point_b_source_interval is not None
+    assert basic.diagnostics.selected_bundle_cluster_id is not None
+    assert basic.diagnostics.selected_bundle_support_ratio is not None
+    assert basic.diagnostics.remote_interval_rejection_count is not None
 
 
 def test_wire_basic_skips_rejected_interval_diagnostics() -> None:
@@ -113,12 +126,18 @@ def test_wire_basic_skips_rejected_interval_diagnostics() -> None:
     frame, roi = _wire_bundle_with_blob_frame()
 
     full = detector.detect(
-        frame=frame, roi=roi, segmentation=_wire_segmentation(),
-        params=WireStripDetectorParams(), debug_level="full",
+        frame=frame,
+        roi=roi,
+        segmentation=_wire_segmentation(),
+        params=WireStripDetectorParams(),
+        debug_level="full",
     )
     basic = detector.detect(
-        frame=frame, roi=roi, segmentation=_wire_segmentation(),
-        params=WireStripDetectorParams(), debug_level="basic",
+        frame=frame,
+        roi=roi,
+        segmentation=_wire_segmentation(),
+        params=WireStripDetectorParams(),
+        debug_level="basic",
     )
 
     _assert_same_formal_result(full, basic)
@@ -134,12 +153,18 @@ def test_balloon_basic_matches_full_formal_ab() -> None:
     segmentation = SegmentationParams(close_kernel=7, open_kernel=1)
 
     full = detector.detect(
-        frame=frame, roi=roi, segmentation=segmentation,
-        params=BalloonEnvelopeDetectorParams(), debug_level="full",
+        frame=frame,
+        roi=roi,
+        segmentation=segmentation,
+        params=BalloonEnvelopeDetectorParams(),
+        debug_level="full",
     )
     basic = detector.detect(
-        frame=frame, roi=roi, segmentation=segmentation,
-        params=BalloonEnvelopeDetectorParams(), debug_level="basic",
+        frame=frame,
+        roi=roi,
+        segmentation=segmentation,
+        params=BalloonEnvelopeDetectorParams(),
+        debug_level="basic",
     )
 
     assert full.status is DetectionStatus.OK

@@ -8,19 +8,16 @@ export function formatPoint(point: Point2D | null): string {
 }
 
 export function formatNullableNumber(value: number | null, digits = 2): string {
-  if (value === null || !Number.isFinite(value)) {
-    return "N/A";
-  }
-  return value.toFixed(digits);
+  return value === null ? "N/A" : value.toFixed(digits);
 }
 
 export function detectionReason(detection: SetupDetectResponse | null): string {
   if (detection === null) {
-    return "N/A";
+    return "-";
   }
   const message = detection.diagnostics.message;
   if (typeof message === "string" && message.length > 0) {
     return message;
   }
-  return detection.valid ? "N/A" : detection.status;
+  return detection.status === "ok" ? "-" : detection.status;
 }

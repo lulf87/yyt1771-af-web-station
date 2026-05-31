@@ -62,6 +62,7 @@ describe("RunPage live offline mode", () => {
     expect(markup).toContain("Open Live Source");
     expect(markup).toContain("Play");
     expect(markup).toContain("Step Next");
+    expect(markup).toContain("Inspect current frame");
     expect(markup).toContain("Seek");
     expect(markup).toContain("Loop");
     expect(markup).not.toContain("two_strip_outer_to_outer");
@@ -72,7 +73,12 @@ describe("RunPage live offline mode", () => {
     expect(markup).toContain("Failed frame");
     expect(markup).toContain("Target fps");
     expect(markup).toContain("Segmentation ms");
+    expect(markup).toContain("Connected components ms");
     expect(markup).toContain("Wire filtering ms");
     expect(markup).toContain("Line scan ms");
+    expect(markup).toContain("Candidate scoring ms");
+    expect(markup).toContain("Diagnostics ms");
+    expect(markup).toContain("Detector total ms");
+    expect(markup).toContain("Frame budget ms");
   });
 });

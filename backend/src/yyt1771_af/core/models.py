@@ -269,6 +269,8 @@ class DetectionDiagnostics(BaseModel):
     remote_interval_rejection_count: int | None = None
     leftmost_valid_interval: ObjectInterval | None = None
     rightmost_valid_interval: ObjectInterval | None = None
+    point_a_source_interval: ObjectInterval | None = None
+    point_b_source_interval: ObjectInterval | None = None
     formal_point_a_source_interval: ObjectInterval | None = None
     formal_point_b_source_interval: ObjectInterval | None = None
     broad_blob_rejection_count: int | None = None
@@ -367,6 +369,8 @@ class DetectionResult(BaseModel):
                 raise ValueError("invalid detection results require a failure status")
             if self.distance_px is not None:
                 raise ValueError("invalid detection results must not include distance_px")
+            if self.point_a is not None or self.point_b is not None:
+                raise ValueError("invalid detection results must not include formal points")
 
         for point_name in ("point_a", "point_b"):
             point = getattr(self, point_name)

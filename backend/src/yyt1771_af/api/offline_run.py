@@ -69,6 +69,18 @@ def next_offline_run(session_id: str) -> OfflineRunFrameResponse:
         raise HTTPException(status_code=400, detail=_safe_error_detail(exc)) from exc
 
 
+@router.post("/{session_id}/inspect", response_model=OfflineRunFrameResponse)
+def inspect_offline_run(session_id: str) -> OfflineRunFrameResponse:
+    try:
+        return offline_run_service.inspect(session_id)
+    except OfflineRunRequestError as exc:
+        return _offline_run_error_response(exc)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=_safe_error_detail(exc)) from exc
+    except (IndexError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=_safe_error_detail(exc)) from exc
+
+
 @router.post("/{session_id}/previous", response_model=OfflineRunFrameResponse)
 def previous_offline_run(session_id: str) -> OfflineRunFrameResponse:
     try:

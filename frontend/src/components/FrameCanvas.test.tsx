@@ -98,6 +98,34 @@ describe("FrameCanvas", () => {
     expect(markup).not.toContain("point point-b");
   });
 
+  it("does not draw formal A/B if an invalid payload accidentally contains points", () => {
+    const invalidDetection: SetupDetectResponse = {
+      status: "caliper_contact_on_roi_boundary",
+      valid: false,
+      point_a: { x: 60, y: 110, coordinate_space: "acquisition" },
+      point_b: { x: 160, y: 110, coordinate_space: "acquisition" },
+      distance_px: null,
+      quality: 1,
+      target_family: "balloon_envelope",
+      detector: "balloon_envelope_detector:v1",
+      diagnostics: {},
+    };
+
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={invalidDetection}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+      />,
+    );
+
+    expect(markup).toContain("detection-invalid-banner");
+    expect(markup).not.toContain("measurement-line");
+    expect(markup).not.toContain("point point-a");
+    expect(markup).not.toContain("point point-b");
+  });
+
   it("marks rejected candidates as debug-only for invalid detections", () => {
     const invalidDetection: SetupDetectResponse = {
       status: "caliper_contact_on_roi_boundary",
@@ -154,6 +182,7 @@ describe("FrameCanvas", () => {
         frameRef={frameRef}
         previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
         roi={roi}
+        showDiagnosticsOverlay
       />,
     );
 
@@ -185,10 +214,80 @@ describe("FrameCanvas", () => {
         frameRef={frameRef}
         previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
         roi={roi}
+        showDiagnosticsOverlay
       />,
     );
 
     expect(markup).toContain("rejected-interval-segment");
+    expect(markup).toContain("measurement-line");
+    expect(markup).not.toContain("REJECTED DEBUG");
+  });
+
+  it("keeps interval diagnostics hidden during playback when diagnostics overlay is disabled", () => {
+    const wireDetection: SetupDetectResponse = {
+      status: "ok",
+      valid: true,
+      point_a: { x: 70, y: 110, coordinate_space: "acquisition" },
+      point_b: { x: 150, y: 110, coordinate_space: "acquisition" },
+      distance_px: 80,
+      quality: 0.9,
+      target_family: "wire_strip",
+      detector: "wire_strip_detector:v1",
+      diagnostics: {
+        point_a_source_interval: { start_local_x: -40, end_local_x: -34, width_px: 6, line_y: 0 },
+        point_b_source_interval: { start_local_x: 34, end_local_x: 40, width_px: 6, line_y: 0 },
+        selected_valid_intervals: [
+          { start_local_x: -40, end_local_x: -34, width_px: 6, line_y: 0 },
+          { start_local_x: 34, end_local_x: 40, width_px: 6, line_y: 0 },
+        ],
+        rejected_remote_intervals: [
+          { start_local_x: 120, end_local_x: 126, width_px: 6, line_y: 0 },
+        ],
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={wireDetection}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+      />,
+    );
+
+    expect(markup).toContain("measurement-line");
+    expect(markup).not.toContain("source-interval-segment");
+    expect(markup).not.toContain("selected-interval-segment");
+    expect(markup).not.toContain("rejected-interval-segment");
+  });
+
+  it("draws formal source intervals when diagnostics overlay is enabled", () => {
+    const wireDetection: SetupDetectResponse = {
+      status: "ok",
+      valid: true,
+      point_a: { x: 70, y: 110, coordinate_space: "acquisition" },
+      point_b: { x: 150, y: 110, coordinate_space: "acquisition" },
+      distance_px: 80,
+      quality: 0.9,
+      target_family: "wire_strip",
+      detector: "wire_strip_detector:v1",
+      diagnostics: {
+        point_a_source_interval: { start_local_x: -40, end_local_x: -34, width_px: 6, line_y: 0 },
+        point_b_source_interval: { start_local_x: 34, end_local_x: 40, width_px: 6, line_y: 0 },
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={wireDetection}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+        showDiagnosticsOverlay
+      />,
+    );
+
+    expect(markup).toContain("source-interval-segment");
     expect(markup).toContain("measurement-line");
     expect(markup).not.toContain("REJECTED DEBUG");
   });
