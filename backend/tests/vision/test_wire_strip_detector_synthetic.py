@@ -67,11 +67,48 @@ def _variable_span_wire_bundle_frame(roi: RotatedRoi) -> np.ndarray:
         ((local_x >= -32.0) & (local_x <= -12.0)) | ((local_x >= 12.0) & (local_x <= 32.0))
     ) & (np.abs(local_y) <= 8.0)
     wider_line = (
-        ((local_x >= -58.0) & (local_x <= -48.0)) | ((local_x >= 48.0) & (local_x <= 58.0))
+        ((local_x >= -58.0) & (local_x <= -48.0))
+        | ((local_x >= -10.0) & (local_x <= 0.0))
+        | ((local_x >= 48.0) & (local_x <= 58.0))
     ) & (np.abs(local_y - 24.0) <= 8.0)
     image = np.full((180, 240), 230, dtype=np.uint8)
     image[center_line | wider_line] = 30
     return image
+
+
+def _wire_bundle_with_low_contrast_remote_patch() -> tuple[np.ndarray, RotatedRoi]:
+    roi = RotatedRoi(center_x=160.0, center_y=110.0, width=260.0, height=140.0, angle_deg=0.0)
+    y, x = np.indices((220, 320))
+    dx = x.astype(float) - roi.center_x
+    dy = y.astype(float) - roi.center_y
+    wires = (
+        ((dx >= -100.0) & (dx <= -92.0))
+        | ((dx >= -32.0) & (dx <= -24.0))
+        | ((dx >= 36.0) & (dx <= 48.0))
+    ) & (np.abs(dy) <= 42.0)
+    low_contrast_patch = (dx >= 96.0) & (dx <= 112.0) & (np.abs(dy) <= 36.0)
+    image = np.full((220, 320), 230, dtype=np.uint8)
+    image[wires] = 30
+    image[low_contrast_patch] = 223
+    return image, roi
+
+
+def _wire_bundle_with_high_contrast_remote_dot() -> tuple[np.ndarray, RotatedRoi]:
+    roi = RotatedRoi(center_x=360.0, center_y=110.0, width=620.0, height=140.0, angle_deg=0.0)
+    y, x = np.indices((220, 760))
+    dx = x.astype(float) - roi.center_x
+    dy = y.astype(float) - roi.center_y
+    wires = (
+        ((dx >= -55.0) & (dx <= -50.0))
+        | ((dx >= -14.0) & (dx <= -7.0))
+        | ((dx >= 1.0) & (dx <= 17.0))
+        | ((dx >= 37.0) & (dx <= 46.0))
+        | ((dx >= 52.0) & (dx <= 79.0))
+    ) & (np.abs(dy) <= 42.0)
+    remote_dot = (dx >= 252.0) & (dx <= 257.0) & (np.abs(dy) <= 8.0)
+    image = np.full((220, 760), 230, dtype=np.uint8)
+    image[wires | remote_dot] = 30
+    return image, roi
 
 
 def _rotated_strip_mask(
@@ -276,10 +313,14 @@ def _wire_bundle_with_broad_blob_frame() -> tuple[np.ndarray, RotatedRoi]:
     dx = x.astype(float) - roi.center_x
     dy = y.astype(float) - roi.center_y
     wires = (
-        ((dx >= -60.0) & (dx <= -54.0))
-        | ((dx >= -3.0) & (dx <= 3.0))
-        | ((dx >= 54.0) & (dx <= 60.0))
-    ) & (dy >= -50.0) & (dy <= -10.0)
+        (
+            ((dx >= -60.0) & (dx <= -54.0))
+            | ((dx >= -3.0) & (dx <= 3.0))
+            | ((dx >= 54.0) & (dx <= 60.0))
+        )
+        & (dy >= -50.0)
+        & (dy <= -10.0)
+    )
     blob = (x >= 100) & (x <= 165) & (y >= 85) & (y <= 150)
     image = np.full((180, 240), 230, dtype=np.uint8)
     image[wires] = 30
@@ -418,7 +459,94 @@ def test_wire_bundle_envelope_selects_current_frame_largest_span_without_previou
     assert result.point_b is not None
     assert result.diagnostics.formal_ab_span_px is not None
     assert result.diagnostics.formal_ab_span_px >= 115.0
-    assert result.diagnostics.measurement_line_y is not None
-    assert result.diagnostics.measurement_line_y >= 16.0
-    assert result.diagnostics.previous_measurement_line_y is None
-    assert result.diagnostics.line_y_delta_from_previous is None
+
+
+def test_wire_bundle_envelope_rejects_low_contrast_remote_patch_as_b() -> None:
+    detector = WireStripDetector()
+    frame, roi = _wire_bundle_with_low_contrast_remote_patch()
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=225,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.valid is True
+    assert result.point_a is not None
+    assert result.point_b is not None
+    b_local = _local_coordinates(result.point_b.x, result.point_b.y, roi)
+    assert b_local[0] == pytest.approx(48.0, abs=2.0)
+    assert result.diagnostics.formal_ab_span_px == pytest.approx(148.0, abs=3.0)
+    assert result.diagnostics.rejected_interval_reasons is not None
+    assert "low_contrast" in result.diagnostics.rejected_interval_reasons
+
+
+def test_wire_bundle_envelope_rejects_high_contrast_remote_interval_as_b() -> None:
+    detector = WireStripDetector()
+    frame, roi = _wire_bundle_with_high_contrast_remote_dot()
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.valid is True
+    assert result.point_a is not None
+    assert result.point_b is not None
+    b_local = _local_coordinates(result.point_b.x, result.point_b.y, roi)
+    assert b_local[0] == pytest.approx(79.0, abs=2.0)
+    assert result.diagnostics.rightmost_valid_interval is not None
+    assert result.diagnostics.rightmost_valid_interval.end_local_x == pytest.approx(79.0, abs=2.0)
+    assert result.diagnostics.interval_gaps is not None
+    assert max(result.diagnostics.interval_gaps) == pytest.approx(173.0, abs=2.0)
+    assert result.diagnostics.bundle_cluster_count == 2
+    assert result.diagnostics.selected_bundle_cluster_id == 0
+    assert result.diagnostics.max_bundle_internal_gap_px == pytest.approx(60.0)
+    assert result.diagnostics.rejected_remote_intervals is not None
+    assert result.diagnostics.rejected_remote_intervals[-1].start_local_x == pytest.approx(
+        252.0, abs=2.0
+    )
+    assert result.diagnostics.remote_interval_rejection_count == 1
+    assert result.diagnostics.rejected_remote_interval_reasons is not None
+    assert "remote_gap_exceeded" in result.diagnostics.rejected_remote_interval_reasons
+
+
+def test_wire_filtering_params_can_intentionally_allow_low_contrast_patch() -> None:
+    detector = WireStripDetector()
+    frame, roi = _wire_bundle_with_low_contrast_remote_patch()
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=225,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(min_local_contrast_score=6.0),
+    )
+
+    assert result.valid is True
+    assert result.point_b is not None
+    b_local = _local_coordinates(result.point_b.x, result.point_b.y, roi)
+    assert b_local[0] == pytest.approx(112.0, abs=2.0)

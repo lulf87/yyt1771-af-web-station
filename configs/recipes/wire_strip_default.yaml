@@ -21,3 +21,23 @@ detector:
   require_physical_endpoints: false
   skeleton_endpoint_detection: false
   preserve_visible_strip_contour: true
+  min_interval_width_px: 3.0
+  max_interval_width_ratio: 0.65
+  min_valid_interval_count: 2
+  min_local_contrast_score: 8.0
+  min_wire_likeness_score: 0.0
+  max_broad_blob_area_ratio: 0.22
+  max_component_area_ratio: 0.45
+  min_component_area_px: null
+  max_internal_gap_px: null
+  max_internal_gap_ratio: 0.9
+  max_bundle_internal_gap_px: 60.0
+  max_bundle_internal_gap_ratio: 1.0
+  min_neighbor_line_support: 1
+  component_aspect_ratio_min: 1.8
+  broad_blob_max_aspect_ratio: 1.8
+  enable_broad_blob_rejection: true
+  enable_local_contrast_filter: true
+  enable_neighbor_line_support_filter: true
+  enable_remote_interval_rejection: true
+  enable_orientation_scoring: true

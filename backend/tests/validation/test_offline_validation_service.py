@@ -96,6 +96,13 @@ def test_offline_validation_runner_writes_manifest_samples_summary_and_curves(
     assert summary["parallel_error_px_max"] <= 1.0
     assert summary["pattern_mismatch_count"] >= 0
     assert summary["object_interval_count_histogram"]
+    assert "valid_interval_count_mean" in summary
+    assert "rejected_interval_count_mean" in summary
+    assert "broad_blob_rejection_count_mean" in summary
+    assert "broad_blob_area_ratio_mean" in summary
+    assert "wire_likeness_score_mean" in summary
+    assert "formal_ab_span_px_mean" in summary
+    assert summary["auto_tune_threshold_summary"]["threshold_mode"] is not None
     assert summary["top_jump_frames"]
 
     sample_lines = (

@@ -72,3 +72,29 @@ def test_auto_tune_avoids_thresholds_that_admit_broad_blob() -> None:
     assert by_threshold[125].broad_blob_rejection_count is not None
     assert by_threshold[125].broad_blob_rejection_count >= 1
     assert by_threshold[125].on_stable_platform is False
+
+
+def test_auto_tune_candidates_expose_wire_filtering_evidence() -> None:
+    frame, roi = _wire_bundle_with_high_threshold_blob()
+
+    result = auto_tune_wire_threshold(
+        frame=frame,
+        roi=roi,
+        base_segmentation=SegmentationParams(polarity="dark_on_light", min_component_area_px=20),
+        candidate_thresholds=[80, 125],
+    )
+
+    by_threshold = {candidate.threshold_value: candidate for candidate in result.candidates}
+    accepted = by_threshold[80]
+    rejected_blob = by_threshold[125]
+
+    assert accepted.selected_valid_intervals
+    assert accepted.point_a_on_foreground_boundary is True
+    assert accepted.point_b_on_foreground_boundary is True
+    assert accepted.local_contrast_score is not None
+    assert accepted.neighbor_line_support is not None
+    assert accepted.failure_reason is None
+
+    assert rejected_blob.broad_blob_area_ratio is not None
+    assert rejected_blob.rejected_interval_count >= 1
+    assert rejected_blob.failure_reason is None

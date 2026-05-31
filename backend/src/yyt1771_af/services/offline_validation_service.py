@@ -343,9 +343,7 @@ def run_offline_threshold_sweep(
             )
             for offset, frame_path in enumerate(selected_paths)
         ]
-        candidate_summaries.append(
-            _threshold_candidate_summary(int(threshold), samples)
-        )
+        candidate_summaries.append(_threshold_candidate_summary(int(threshold), samples))
 
     recommended = _recommend_sweep_threshold(candidate_summaries)
     summary_payload = sanitize_path_metadata(
@@ -382,8 +380,7 @@ def _threshold_candidate_summary(
     interval_histogram = dict(
         sorted(
             Counter(
-                str(int(value))
-                for value in _diagnostic_values(samples, "object_interval_count")
+                str(int(value)) for value in _diagnostic_values(samples, "object_interval_count")
             ).items()
         )
     )
@@ -651,6 +648,16 @@ def _summary(
     processing_times = [float(sample["processing_ms"]) for sample in samples]
     local_y_deltas = _diagnostic_values(valid_samples, "local_y_delta_px")
     parallel_errors = _diagnostic_values(valid_samples, "parallel_error_px")
+    valid_interval_counts = _diagnostic_values(samples, "interval_count") or _diagnostic_values(
+        samples, "object_interval_count"
+    )
+    rejected_interval_counts = [
+        float(len(_diagnostic_value(sample, "rejected_intervals") or [])) for sample in samples
+    ]
+    broad_blob_counts = _diagnostic_values(samples, "broad_blob_rejection_count")
+    broad_blob_area_ratios = _diagnostic_values(samples, "broad_blob_area_ratio")
+    wire_likeness_scores = _diagnostic_values(samples, "wire_likeness_score")
+    formal_spans = _diagnostic_values(valid_samples, "formal_ab_span_px")
     pattern_mismatch_count = sum(
         1
         for sample in samples
@@ -659,15 +666,7 @@ def _summary(
         != _diagnostic_value(sample, "pattern_model")
     )
     interval_histogram = dict(
-        sorted(
-            Counter(
-                str(int(value))
-                for value in (
-                    _diagnostic_values(samples, "interval_count")
-                    or _diagnostic_values(samples, "object_interval_count")
-                )
-            ).items()
-        )
+        sorted(Counter(str(int(value)) for value in valid_interval_counts).items())
     )
     bundle_spans = _diagnostic_values(valid_samples, "bundle_outer_span_px")
     processed_frames = len(samples)
@@ -704,6 +703,28 @@ def _summary(
             "pattern_mismatch_count": pattern_mismatch_count,
             "object_interval_count_histogram": interval_histogram,
             "wire_interval_count_histogram": interval_histogram,
+            "valid_interval_count_mean": _mean_or_none(valid_interval_counts),
+            "valid_interval_count_max": _max_or_none(valid_interval_counts),
+            "rejected_interval_count_mean": _mean_or_none(rejected_interval_counts),
+            "rejected_interval_count_max": _max_or_none(rejected_interval_counts),
+            "broad_blob_rejection_count_mean": _mean_or_none(broad_blob_counts),
+            "broad_blob_rejection_count_max": _max_or_none(broad_blob_counts),
+            "broad_blob_area_ratio_mean": _mean_or_none(broad_blob_area_ratios),
+            "broad_blob_area_ratio_max": _max_or_none(broad_blob_area_ratios),
+            "wire_likeness_score_mean": _mean_or_none(wire_likeness_scores),
+            "wire_likeness_score_min": _min_or_none(wire_likeness_scores),
+            "wire_likeness_score_max": _max_or_none(wire_likeness_scores),
+            "formal_ab_span_px_mean": _mean_or_none(formal_spans),
+            "formal_ab_span_px_p95": _p95_or_none(formal_spans),
+            "formal_ab_span_px_max": _max_or_none(formal_spans),
+            "auto_tune_threshold_summary": {
+                "threshold_mode": recipe_snapshot.get("segmentation", {}).get("threshold_mode")
+                if isinstance(recipe_snapshot.get("segmentation"), dict)
+                else None,
+                "threshold_value": recipe_snapshot.get("segmentation", {}).get("threshold_value")
+                if isinstance(recipe_snapshot.get("segmentation"), dict)
+                else None,
+            },
             "bundle_outer_span_px_mean": _mean_or_none(bundle_spans),
             "bundle_outer_span_px_p95": _p95_or_none(bundle_spans),
             "bundle_outer_span_px_max": _max_or_none(bundle_spans),

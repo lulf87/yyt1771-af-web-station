@@ -447,9 +447,13 @@ function WireAutoTunePanel({ result }: { result: WireAutoTuneResponse }) {
             <th>intervals</th>
             <th>rejected</th>
             <th>broad blob</th>
+            <th>contrast</th>
+            <th>support</th>
+            <th>margin</th>
             <th>wire-like</th>
             <th>score</th>
             <th>platform</th>
+            <th>reason</th>
           </tr>
         </thead>
         <tbody>
@@ -464,9 +468,13 @@ function WireAutoTunePanel({ result }: { result: WireAutoTuneResponse }) {
               <td>{candidate.valid_interval_count ?? "N/A"}</td>
               <td>{candidate.rejected_interval_count}</td>
               <td>{candidate.broad_blob_rejection_count ?? "N/A"}</td>
+              <td>{formatNumber(candidate.local_contrast_score)}</td>
+              <td>{candidate.neighbor_line_support ?? "N/A"}</td>
+              <td>{formatNumber(candidate.roi_margin_px)}</td>
               <td>{formatNumber(candidate.wire_likeness_score)}</td>
               <td>{formatNumber(candidate.score)}</td>
               <td>{candidate.on_stable_platform ? "✓" : ""}</td>
+              <td>{candidate.failure_reason ?? ""}</td>
             </tr>
           ))}
         </tbody>
@@ -514,6 +522,20 @@ function RecipeSummaryRows({
     ["Min area", segmentation.min_component_area_px],
     ["Auto tuned", autoTuned],
   ];
+  if (detector.detector_kind === "wire_strip_detector") {
+    rows.push(
+      ["Min interval width", detector.min_interval_width_px],
+      ["Max interval width ratio", detector.max_interval_width_ratio],
+      ["Min valid intervals", detector.min_valid_interval_count],
+      ["Min local contrast", detector.min_local_contrast_score],
+      ["Min wire likeness", detector.min_wire_likeness_score],
+      ["Max broad blob area ratio", detector.max_broad_blob_area_ratio],
+      ["Max internal gap ratio", detector.max_internal_gap_ratio],
+      ["Max bundle gap px", detector.max_bundle_internal_gap_px],
+      ["Max bundle gap ratio", detector.max_bundle_internal_gap_ratio],
+      ["Min neighbor support", detector.min_neighbor_line_support],
+    );
+  }
   return (
     <>
       {rows.map(([label, value]) => (

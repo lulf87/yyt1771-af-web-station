@@ -19,12 +19,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from yyt1771_af.core.geometry import roi_measurement_direction
-from yyt1771_af.core.models import RotatedRoi
+from yyt1771_af.core.models import ComponentBBox, RotatedRoi, WireStripDetectorParams
 from yyt1771_af.vision.segmentation import BinaryComponent, binary_dilate
 
-# Wire-likeness thresholds. These are deterministic constants so that a
-# confirmed recipe reproduces detection exactly. Auto tune (Phase 3) sweeps the
-# segmentation threshold, not these shape gates.
+# Wire-likeness defaults. The detector passes a confirmed
+# ``WireStripDetectorParams`` snapshot at run time; these constants remain only
+# as fallback defaults for direct unit usage.
 MIN_WIRE_ASPECT_RATIO = 1.8
 BROAD_BLOB_AREA_RATIO = 0.22
 BROAD_BLOB_MAX_ASPECT_RATIO = 1.8
@@ -40,10 +40,13 @@ _MAX_AREA_RATIO = 0.45
 
 @dataclass(frozen=True, slots=True)
 class WireComponentMetric:
+    component_id: int
     area_px: int
     area_ratio_in_roi: float
+    bbox: ComponentBBox
     aspect_ratio: float
     orientation_deg: float
+    orientation_deviation_deg: float
     local_contrast: float
     wire_likeness_score: float
     accepted: bool
@@ -70,7 +73,9 @@ def analyze_wire_components(
     roi_mask: np.ndarray,
     foreground: np.ndarray,
     components: list[BinaryComponent],
+    params: WireStripDetectorParams | None = None,
 ) -> WireForegroundAnalysis:
+    params = params or WireStripDetectorParams()
     gray = np.asarray(image)
     roi_area = max(1, int(np.count_nonzero(roi_mask)))
     foreground_bool = np.asarray(foreground, dtype=bool)
@@ -85,8 +90,9 @@ def analyze_wire_components(
     rejected_count = 0
     primary: tuple[float, WireComponentMetric, BinaryComponent] | None = None
 
-    for component in components:
+    for component_id, component in enumerate(components):
         metric = _component_metric(
+            component_id=component_id,
             component=component,
             gray=gray,
             roi=roi,
@@ -97,6 +103,7 @@ def analyze_wire_components(
             unit_y=unit_y,
             perp_x=perp_x,
             perp_y=perp_y,
+            params=params,
         )
         metrics.append(metric)
         if metric.accepted:
@@ -127,6 +134,7 @@ def analyze_wire_components(
 
 def _component_metric(
     *,
+    component_id: int,
     component: BinaryComponent,
     gray: np.ndarray,
     roi: RotatedRoi,
@@ -137,6 +145,7 @@ def _component_metric(
     unit_y: float,
     perp_x: float,
     perp_y: float,
+    params: WireStripDetectorParams,
 ) -> WireComponentMetric:
     coords = component.coordinates_yx
     area_px = int(coords.shape[0])
@@ -147,6 +156,7 @@ def _component_metric(
     local_x = centered_x * unit_x + centered_y * unit_y
     local_y = centered_x * perp_x + centered_y * perp_y
     aspect_ratio, orientation_deg = _pca_shape(local_x, local_y)
+    orientation_deviation = orientation_deg if params.enable_orientation_scoring else 0.0
     local_contrast = _local_contrast(
         component=component,
         gray=gray,
@@ -159,15 +169,21 @@ def _component_metric(
         area_ratio=area_ratio,
     )
     accepted, reject_reason = _classify(
+        area_px=area_px,
         aspect_ratio=aspect_ratio,
         area_ratio=area_ratio,
         local_contrast=local_contrast,
+        wire_likeness_score=wire_likeness,
+        params=params,
     )
     return WireComponentMetric(
+        component_id=component_id,
         area_px=area_px,
         area_ratio_in_roi=round(area_ratio, 6),
+        bbox=_component_bbox(component),
         aspect_ratio=round(aspect_ratio, 4),
         orientation_deg=round(orientation_deg, 4),
+        orientation_deviation_deg=round(orientation_deviation, 4),
         local_contrast=round(local_contrast, 4),
         wire_likeness_score=round(wire_likeness, 4),
         accepted=accepted,
@@ -203,12 +219,22 @@ def _local_contrast(
     roi_mask: np.ndarray,
     foreground: np.ndarray,
 ) -> float:
-    component_values = gray[component.mask]
+    coords = component.coordinates_yx
+    if coords.size == 0:
+        return 0.0
+    pad = LOCAL_CONTRAST_BAND_PX
+    y0 = max(0, int(np.min(coords[:, 0])) - pad)
+    y1 = min(gray.shape[0], int(np.max(coords[:, 0])) + pad + 1)
+    x0 = max(0, int(np.min(coords[:, 1])) - pad)
+    x1 = min(gray.shape[1], int(np.max(coords[:, 1])) + pad + 1)
+    component_window = component.mask[y0:y1, x0:x1]
+    gray_window = gray[y0:y1, x0:x1]
+    component_values = gray_window[component_window]
     if component_values.size == 0:
         return 0.0
-    dilated = binary_dilate(component.mask, 2 * LOCAL_CONTRAST_BAND_PX + 1)
-    band = dilated & roi_mask & ~foreground
-    band_values = gray[band]
+    dilated = binary_dilate(component_window, 2 * LOCAL_CONTRAST_BAND_PX + 1)
+    band = dilated & roi_mask[y0:y1, x0:x1] & ~foreground[y0:y1, x0:x1]
+    band_values = gray_window[band]
     if band_values.size == 0:
         return 0.0
     return float(np.mean(band_values) - np.mean(component_values))
@@ -233,18 +259,40 @@ def _wire_likeness_score(
 
 def _classify(
     *,
+    area_px: int,
     aspect_ratio: float,
     area_ratio: float,
     local_contrast: float,
+    wire_likeness_score: float,
+    params: WireStripDetectorParams,
 ) -> tuple[bool, str | None]:
-    if area_ratio >= BROAD_BLOB_AREA_RATIO and aspect_ratio < BROAD_BLOB_MAX_ASPECT_RATIO:
+    min_component_area = params.min_component_area_px
+    if min_component_area is not None and area_px < min_component_area:
+        return False, "component_too_small"
+    if (
+        params.enable_broad_blob_rejection
+        and area_ratio >= params.max_broad_blob_area_ratio
+        and aspect_ratio < params.broad_blob_max_aspect_ratio
+    ):
         return False, "broad_blob"
-    if local_contrast < MIN_LOCAL_CONTRAST:
+    if params.enable_broad_blob_rejection and area_ratio > params.max_component_area_ratio:
+        return False, "component_too_large"
+    if params.enable_local_contrast_filter and local_contrast < params.min_local_contrast_score:
         return False, "low_contrast"
-    if aspect_ratio < MIN_WIRE_ASPECT_RATIO and area_ratio >= _GOOD_AREA_RATIO:
-        return False, "not_slender"
+    if wire_likeness_score < params.min_wire_likeness_score:
+        return False, "low_wire_likeness"
     return True, None
 
 
 def _clip01(value: float) -> float:
     return float(min(1.0, max(0.0, value)))
+
+
+def _component_bbox(component: BinaryComponent) -> ComponentBBox:
+    yx = component.coordinates_yx
+    return ComponentBBox(
+        min_x=int(np.min(yx[:, 1])),
+        min_y=int(np.min(yx[:, 0])),
+        max_x=int(np.max(yx[:, 1])),
+        max_y=int(np.max(yx[:, 0])),
+    )

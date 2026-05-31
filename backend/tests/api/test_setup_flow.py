@@ -258,8 +258,9 @@ def test_setup_wire_auto_tune_recommends_threshold_and_confirm_marks_auto_tuned(
     assert payload["auto_tuned"] is True
     assert payload["recommended_threshold_value"] is not None
     assert payload["recommended_segmentation"]["threshold_mode"] == "fixed"
-    assert payload["recommended_segmentation"]["threshold_value"] == (
-        payload["recommended_threshold_value"]
+    assert (
+        payload["recommended_segmentation"]["threshold_value"]
+        == (payload["recommended_threshold_value"])
     )
     assert len(payload["candidates"]) >= 1
     candidate = payload["candidates"][0]
@@ -283,6 +284,54 @@ def test_setup_wire_auto_tune_recommends_threshold_and_confirm_marks_auto_tuned(
     measurement_definition = confirm_response.json()["measurement_definition"]
     assert measurement_definition["auto_tuned"] is True
     assert measurement_definition["segmentation"]["threshold_mode"] == "fixed"
+
+
+def test_setup_confirm_persists_wire_filtering_params_snapshot() -> None:
+    client = TestClient(app)
+    client.post("/api/camera/open", json={"profile": "dev_mock"})
+    roi = {
+        "center_x": 235.0,
+        "center_y": 110.0,
+        "width": 55.0,
+        "height": 150.0,
+        "angle_deg": 90.0,
+        "coordinate_space": "acquisition",
+    }
+
+    confirm_response = client.post(
+        "/api/setup/confirm",
+        json={
+            "name": "wire-param-snapshot",
+            "target_family": "wire_strip",
+            "roi": roi,
+            "recipe_name": "wire_strip_default",
+            "detector": {
+                "detector_kind": "wire_strip_detector",
+                "measurement_model": "blank_wire_bundle_envelope_blank",
+                "measurement_mode": "wire_bundle_envelope",
+                "min_quality": 0.6,
+                "max_point_jump_px": 20.0,
+                "reject_contact_on_roi_boundary": True,
+                "boundary_margin_px": 3.0,
+                "require_physical_endpoints": False,
+                "skeleton_endpoint_detection": False,
+                "preserve_visible_strip_contour": True,
+                "min_interval_width_px": 4.0,
+                "max_interval_width_ratio": 0.55,
+                "min_valid_interval_count": 2,
+                "min_local_contrast_score": 8.0,
+                "max_internal_gap_ratio": 0.45,
+                "min_neighbor_line_support": 1,
+            },
+        },
+    )
+
+    assert confirm_response.status_code == 200
+    detector = confirm_response.json()["measurement_definition"]["detector"]
+    assert detector["min_interval_width_px"] == 4.0
+    assert detector["max_interval_width_ratio"] == 0.55
+    assert detector["min_local_contrast_score"] == 8.0
+    assert detector["max_internal_gap_ratio"] == 0.45
 
 
 def test_offline_camera_open_reads_pgm_image_folder(

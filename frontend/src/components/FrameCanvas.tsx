@@ -76,7 +76,10 @@ export function FrameCanvas({
       : [];
   const rejectedIntervalSegments =
     detection !== null
-      ? diagnosticIntervalsToSegments(detection.diagnostics.rejected_intervals, roi)
+      ? [
+          ...diagnosticIntervalsToSegments(detection.diagnostics.rejected_intervals, roi),
+          ...diagnosticIntervalsToSegments(detection.diagnostics.rejected_remote_intervals, roi),
+        ]
       : [];
   const rejectedA =
     detection !== null && !detection.valid

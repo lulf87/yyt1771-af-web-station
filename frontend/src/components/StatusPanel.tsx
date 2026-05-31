@@ -103,9 +103,29 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
     ["Selected valid intervals", intervalSummary(diagnostics.selected_valid_intervals)],
     ["Rejected intervals", intervalSummary(diagnostics.rejected_intervals)],
     ["Rejected interval reasons", reasonSummary(diagnostics.rejected_interval_reasons)],
+    ["Interval gaps", numberListSummary(diagnostics.interval_gaps)],
+    ["Bundle clusters", valueText(diagnostics.bundle_cluster_count)],
+    ["Selected bundle cluster", valueText(diagnostics.selected_bundle_cluster_id)],
+    ["Selected bundle intervals", valueText(diagnostics.selected_bundle_interval_count)],
+    ["Selected bundle span", valueText(diagnostics.selected_bundle_outer_span_px)],
+    ["Selected bundle support", valueText(diagnostics.selected_bundle_support_ratio)],
+    ["Selected bundle max gap", valueText(diagnostics.selected_bundle_max_internal_gap_px)],
+    ["Max bundle gap threshold", valueText(diagnostics.max_bundle_internal_gap_px)],
+    ["Max bundle gap ratio", valueText(diagnostics.max_bundle_internal_gap_ratio)],
+    ["Rejected remote intervals", intervalSummary(diagnostics.rejected_remote_intervals)],
+    [
+      "Rejected remote reasons",
+      reasonSummary(diagnostics.rejected_remote_interval_reasons),
+    ],
+    ["Remote interval rejections", valueText(diagnostics.remote_interval_rejection_count)],
+    ["Local contrast", valueText(diagnostics.local_contrast_score)],
     ["Wire likeness", valueText(diagnostics.wire_likeness_score)],
+    ["Component area", valueText(diagnostics.component_area_px ?? diagnostics.selected_component_area_px)],
+    ["Component bbox", bboxText(diagnostics.component_bbox ?? diagnostics.selected_component_bbox)],
     ["Component aspect ratio", valueText(diagnostics.component_aspect_ratio)],
     ["Component orientation", valueText(diagnostics.component_orientation)],
+    ["Component orientation deg", valueText(diagnostics.component_orientation_deg)],
+    ["Orientation deviation", valueText(diagnostics.orientation_deviation_deg)],
     ["Neighbor line support", valueText(diagnostics.neighbor_line_support)],
     ["Broad blob rejections", valueText(diagnostics.broad_blob_rejection_count)],
     ["Broad blob area ratio", valueText(diagnostics.broad_blob_area_ratio)],
@@ -140,8 +160,8 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
     ["Distance jump", valueText(diagnostics.distance_jump_from_previous)],
     ["Point A jump", valueText(diagnostics.point_a_jump_from_previous)],
     ["Point B jump", valueText(diagnostics.point_b_jump_from_previous)],
-    ["Component area", valueText(diagnostics.selected_component_area_px)],
-    ["Component bbox", bboxText(diagnostics.selected_component_bbox)],
+    ["Selected component area", valueText(diagnostics.selected_component_area_px)],
+    ["Selected component bbox", bboxText(diagnostics.selected_component_bbox)],
     ["Component count", valueText(diagnostics.candidate_component_count)],
     ["Min projection", valueText(diagnostics.min_local_projection)],
     ["Max projection", valueText(diagnostics.max_local_projection)],
@@ -227,6 +247,13 @@ function reasonSummary(value: unknown): string {
     return "N/A";
   }
   return value.map((item) => (typeof item === "string" ? item : "N/A")).join(", ");
+}
+
+function numberListSummary(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) {
+    return "N/A";
+  }
+  return value.map((item) => valueText(item)).join(", ");
 }
 
 function intervalSummary(value: unknown): string {

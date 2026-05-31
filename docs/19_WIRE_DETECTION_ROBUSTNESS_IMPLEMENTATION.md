@@ -46,18 +46,30 @@ foreground via component-level metrics computed per connected component:
 - local contrast across the component boundary band,
 - broad-blob rejection (large, low-aspect, low-contrast regions).
 
+The thresholds that affect formal A/B selection live in
+`WireStripDetectorParams`, so a confirmed setup stores the exact filtering
+recipe used by Run, Live Offline Run, and Offline Validation. The current
+snapshot includes interval width/count gates, local-contrast minimum,
+wire-likeness minimum, broad-blob and component-area limits, internal-gap limit,
+and neighbor-line support. Orientation and aspect ratio are diagnostics/score
+signals only in this phase; orientation is not a hard rejection gate.
+
 `roi_ops` line scanning additionally caps the largest internal gap
-(`_largest_gap_bounded_cluster`, `_WIRE_MAX_INTERNAL_GAP_RATIO`) so disjoint
-non-wire regions are never merged into one bundle. The detector runs chord
-contact selection on the filtered `wire_foreground`, so background blobs cannot
-extend the formal `bundle_outer_span_px` / `formal_ab_span_px`.
+(`_largest_gap_bounded_cluster`, configured by `max_internal_gap_px` or
+`max_internal_gap_ratio`) so disjoint non-wire regions are never merged into one
+bundle. The detector runs chord contact selection on the filtered
+`wire_foreground`, so background blobs and low-contrast patches cannot extend
+the formal `bundle_outer_span_px` / `formal_ab_span_px`.
 
 ## Phase 3 — Setup Wire Auto Tune
 
 `vision/wire_auto_tune.py` (pure NumPy) sweeps candidate fixed thresholds
 (baseline plus ROI histogram percentiles), runs the detector per candidate, and
-scores each by validity, wire-likeness, and rejection penalties. It selects the
-widest "stable platform" of adjacent thresholds and recommends its
+scores each by validity, foreground-boundary support, local contrast,
+neighbor-line support, wire-likeness, and rejection penalties. Candidate payloads
+include the selected valid intervals, rejected interval count, broad-blob area,
+local contrast, ROI margin, A/B boundary flags, failure reason, and score. It
+selects the widest "stable platform" of adjacent thresholds and recommends its
 representative.
 
 Exposed through `services/setup_service.py` (`auto_tune_wire`) and

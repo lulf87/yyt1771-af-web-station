@@ -12,6 +12,7 @@ side effects.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -32,8 +33,16 @@ class WireAutoTuneCandidate:
     formal_ab_span_px: float | None
     valid_interval_count: int | None
     rejected_interval_count: int
+    selected_valid_intervals: list[dict[str, Any]]
     broad_blob_rejection_count: int | None
+    broad_blob_area_ratio: float | None
+    local_contrast_score: float | None
     wire_likeness_score: float | None
+    neighbor_line_support: int | None
+    roi_margin_px: float | None
+    point_a_on_foreground_boundary: bool | None
+    point_b_on_foreground_boundary: bool | None
+    failure_reason: str | None
     distance_px: float | None
     score: float
     on_stable_platform: bool = False
@@ -99,6 +108,10 @@ def auto_tune_wire_threshold(
         )
         diagnostics = result.diagnostics
         rejected = diagnostics.rejected_intervals or []
+        selected_intervals = [
+            interval.model_dump(mode="json")
+            for interval in diagnostics.selected_valid_intervals or []
+        ]
         candidates.append(
             WireAutoTuneCandidate(
                 threshold_value=int(threshold),
@@ -107,8 +120,16 @@ def auto_tune_wire_threshold(
                 formal_ab_span_px=diagnostics.formal_ab_span_px,
                 valid_interval_count=diagnostics.object_interval_count,
                 rejected_interval_count=len(rejected),
+                selected_valid_intervals=selected_intervals,
                 broad_blob_rejection_count=diagnostics.broad_blob_rejection_count,
+                broad_blob_area_ratio=diagnostics.broad_blob_area_ratio,
+                local_contrast_score=diagnostics.local_contrast_score,
                 wire_likeness_score=diagnostics.wire_likeness_score,
+                neighbor_line_support=diagnostics.neighbor_line_support,
+                roi_margin_px=_roi_margin_px(diagnostics),
+                point_a_on_foreground_boundary=diagnostics.point_a_on_foreground_boundary,
+                point_b_on_foreground_boundary=diagnostics.point_b_on_foreground_boundary,
+                failure_reason=None if result.valid else diagnostics.message or result.status.value,
                 distance_px=result.distance_px,
                 score=_score_candidate(result.valid, diagnostics, len(rejected)),
             )
@@ -121,11 +142,16 @@ def _score_candidate(valid: bool, diagnostics: object, rejected_count: int) -> f
     if not valid:
         return -1.0
     wire_likeness = getattr(diagnostics, "wire_likeness_score", None) or 0.0
+    local_contrast = getattr(diagnostics, "local_contrast_score", None) or 0.0
     broad_blob = getattr(diagnostics, "broad_blob_rejection_count", None) or 0
     neighbor = getattr(diagnostics, "neighbor_line_support", None) or 0
+    a_boundary = getattr(diagnostics, "point_a_on_foreground_boundary", None)
+    b_boundary = getattr(diagnostics, "point_b_on_foreground_boundary", None)
     score = 1.0
     score += float(wire_likeness)
+    score += min(1.0, float(local_contrast) / 40.0) * 0.3
     score += 0.1 * float(neighbor)
+    score += 0.2 if a_boundary and b_boundary else -0.5
     score -= 0.15 * float(broad_blob)
     score -= 0.05 * float(rejected_count)
     return round(score, 4)
@@ -226,8 +252,16 @@ def _with_platform_flag(
         formal_ab_span_px=candidate.formal_ab_span_px,
         valid_interval_count=candidate.valid_interval_count,
         rejected_interval_count=candidate.rejected_interval_count,
+        selected_valid_intervals=candidate.selected_valid_intervals,
         broad_blob_rejection_count=candidate.broad_blob_rejection_count,
+        broad_blob_area_ratio=candidate.broad_blob_area_ratio,
+        local_contrast_score=candidate.local_contrast_score,
         wire_likeness_score=candidate.wire_likeness_score,
+        neighbor_line_support=candidate.neighbor_line_support,
+        roi_margin_px=candidate.roi_margin_px,
+        point_a_on_foreground_boundary=candidate.point_a_on_foreground_boundary,
+        point_b_on_foreground_boundary=candidate.point_b_on_foreground_boundary,
+        failure_reason=candidate.failure_reason,
         distance_px=candidate.distance_px,
         score=candidate.score,
         on_stable_platform=on_platform,
@@ -237,3 +271,14 @@ def _with_platform_flag(
 def _center(platform: list[WireAutoTuneCandidate]) -> float:
     thresholds = [c.threshold_value for c in platform]
     return (min(thresholds) + max(thresholds)) / 2.0
+
+
+def _roi_margin_px(diagnostics: object) -> float | None:
+    margins = [
+        getattr(diagnostics, "left_margin_px", None),
+        getattr(diagnostics, "right_margin_px", None),
+        getattr(diagnostics, "top_margin_px", None),
+        getattr(diagnostics, "bottom_margin_px", None),
+    ]
+    numeric = [float(value) for value in margins if isinstance(value, int | float)]
+    return round(min(numeric), 4) if numeric else None

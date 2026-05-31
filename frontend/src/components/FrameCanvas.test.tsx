@@ -161,4 +161,35 @@ describe("FrameCanvas", () => {
     expect(markup).toContain("measurement-line");
     expect(markup).not.toContain("REJECTED DEBUG");
   });
+
+  it("renders rejected remote wire intervals as rejected diagnostics", () => {
+    const wireDetection: SetupDetectResponse = {
+      status: "ok",
+      valid: true,
+      point_a: { x: 70, y: 110, coordinate_space: "acquisition" },
+      point_b: { x: 150, y: 110, coordinate_space: "acquisition" },
+      distance_px: 80,
+      quality: 0.9,
+      target_family: "wire_strip",
+      detector: "wire_strip_detector:v1",
+      diagnostics: {
+        rejected_remote_intervals: [
+          { start_local_x: 120, end_local_x: 126, width_px: 6, line_y: 0 },
+        ],
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={wireDetection}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+      />,
+    );
+
+    expect(markup).toContain("rejected-interval-segment");
+    expect(markup).toContain("measurement-line");
+    expect(markup).not.toContain("REJECTED DEBUG");
+  });
 });

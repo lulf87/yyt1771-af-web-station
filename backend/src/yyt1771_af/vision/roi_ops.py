@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 import numpy as np
 
 from yyt1771_af.core.geometry import euclidean_distance, roi_inside_frame, roi_measurement_direction
 from yyt1771_af.core.models import (
+    BundleClusterDiagnostics,
     ComponentBBox,
     DetectionDiagnostics,
     DetectionResult,
@@ -116,6 +118,18 @@ class ContactSelection:
     selected_valid_intervals: list[ObjectInterval] | None = None
     leftmost_valid_interval: ObjectInterval | None = None
     rightmost_valid_interval: ObjectInterval | None = None
+    interval_gaps: list[float] | None = None
+    bundle_cluster_count: int | None = None
+    bundle_clusters: list[BundleClusterDiagnostics] | None = None
+    selected_bundle_cluster_id: int | None = None
+    selected_bundle_interval_count: int | None = None
+    selected_bundle_outer_span_px: float | None = None
+    selected_bundle_support_ratio: float | None = None
+    selected_bundle_max_internal_gap_px: float | None = None
+    max_bundle_internal_gap_px: float | None = None
+    rejected_remote_intervals: list[ObjectInterval] | None = None
+    rejected_remote_interval_reasons: list[str] | None = None
+    remote_interval_rejection_count: int | None = None
     formal_point_a_source_interval: ObjectInterval | None = None
     formal_point_b_source_interval: ObjectInterval | None = None
     point_a_on_foreground_boundary: bool | None = None
@@ -162,6 +176,18 @@ class ContactDebug:
     selected_valid_intervals: list[ObjectInterval] | None = None
     leftmost_valid_interval: ObjectInterval | None = None
     rightmost_valid_interval: ObjectInterval | None = None
+    interval_gaps: list[float] | None = None
+    bundle_cluster_count: int | None = None
+    bundle_clusters: list[BundleClusterDiagnostics] | None = None
+    selected_bundle_cluster_id: int | None = None
+    selected_bundle_interval_count: int | None = None
+    selected_bundle_outer_span_px: float | None = None
+    selected_bundle_support_ratio: float | None = None
+    selected_bundle_max_internal_gap_px: float | None = None
+    max_bundle_internal_gap_px: float | None = None
+    rejected_remote_intervals: list[ObjectInterval] | None = None
+    rejected_remote_interval_reasons: list[str] | None = None
+    remote_interval_rejection_count: int | None = None
     formal_point_a_source_interval: ObjectInterval | None = None
     formal_point_b_source_interval: ObjectInterval | None = None
     point_a_on_foreground_boundary: bool | None = None
@@ -217,6 +243,18 @@ class _LineCandidate:
     selected_valid_intervals: list[ObjectInterval] | None = None
     leftmost_valid_interval: ObjectInterval | None = None
     rightmost_valid_interval: ObjectInterval | None = None
+    interval_gaps: list[float] | None = None
+    bundle_cluster_count: int | None = None
+    bundle_clusters: list[BundleClusterDiagnostics] | None = None
+    selected_bundle_cluster_id: int | None = None
+    selected_bundle_interval_count: int | None = None
+    selected_bundle_outer_span_px: float | None = None
+    selected_bundle_support_ratio: float | None = None
+    selected_bundle_max_internal_gap_px: float | None = None
+    max_bundle_internal_gap_px: float | None = None
+    rejected_remote_intervals: list[ObjectInterval] | None = None
+    rejected_remote_interval_reasons: list[str] | None = None
+    remote_interval_rejection_count: int | None = None
     formal_point_a_source_interval: ObjectInterval | None = None
     formal_point_b_source_interval: ObjectInterval | None = None
     point_a_on_foreground_boundary: bool | None = None
@@ -238,6 +276,18 @@ class _LineCandidate:
     # scanned line. Plain line candidates leave this False to keep them ``None``,
     # matching the original eager behaviour exactly.
     carries_debug_intervals: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _BundleCluster:
+    cluster_id: int
+    intervals: list[ObjectInterval]
+    start_local_x: float
+    end_local_x: float
+    outer_span_px: float
+    total_interval_width_px: float
+    support_ratio: float
+    max_internal_gap_px: float
 
 
 def rotated_roi_mask(shape: tuple[int, int], roi: RotatedRoi) -> np.ndarray:
@@ -481,12 +531,23 @@ def select_roi_local_chord_contacts_debug(
             ),
         )
 
+    interval_cache: dict[float, list[ObjectInterval]] = {}
+
+    def _intervals_for_line(local_y: float) -> list[ObjectInterval]:
+        key = round(float(local_y), 6)
+        cached = interval_cache.get(key)
+        if cached is not None:
+            return cached
+        line_mask, local_x_values = _sample_mask_line(foreground, roi, local_y)
+        intervals_for_line = _line_intervals(line_mask, local_x_values, local_y)
+        interval_cache[key] = intervals_for_line
+        return intervals_for_line
+
     candidates: list[_LineCandidate] = []
     rejected_boundary: list[_LineCandidate] = []
     mismatched: list[_LineCandidate] = []
     for local_y in _measurement_line_values(roi, line_step_px):
-        line_mask, local_x_values = _sample_mask_line(foreground, roi, local_y)
-        intervals = _line_intervals(line_mask, local_x_values, local_y)
+        intervals = _intervals_for_line(local_y)
         if not intervals:
             continue
         scoring_start = time.perf_counter()
@@ -508,6 +569,7 @@ def select_roi_local_chord_contacts_debug(
                 line_step_px=line_step_px,
                 detected_pattern=bundle_detected_pattern,
                 max_internal_gap_px=max_internal_gap_px,
+                neighbor_interval_lookup=_intervals_for_line,
                 selected_line_reason=(
                     "max_formal_ab_span" if prefer_largest_formal_span else "highest_line_score"
                 ),
@@ -765,6 +827,18 @@ def valid_result(
             selected_valid_intervals=selection.selected_valid_intervals,
             leftmost_valid_interval=selection.leftmost_valid_interval,
             rightmost_valid_interval=selection.rightmost_valid_interval,
+            interval_gaps=selection.interval_gaps,
+            bundle_cluster_count=selection.bundle_cluster_count,
+            bundle_clusters=selection.bundle_clusters,
+            selected_bundle_cluster_id=selection.selected_bundle_cluster_id,
+            selected_bundle_interval_count=selection.selected_bundle_interval_count,
+            selected_bundle_outer_span_px=selection.selected_bundle_outer_span_px,
+            selected_bundle_support_ratio=selection.selected_bundle_support_ratio,
+            selected_bundle_max_internal_gap_px=selection.selected_bundle_max_internal_gap_px,
+            max_bundle_internal_gap_px=selection.max_bundle_internal_gap_px,
+            rejected_remote_intervals=selection.rejected_remote_intervals,
+            rejected_remote_interval_reasons=selection.rejected_remote_interval_reasons,
+            remote_interval_rejection_count=selection.remote_interval_rejection_count,
             formal_point_a_source_interval=selection.formal_point_a_source_interval,
             formal_point_b_source_interval=selection.formal_point_b_source_interval,
             point_a_on_foreground_boundary=selection.point_a_on_foreground_boundary,
@@ -1027,36 +1101,152 @@ def _virtual_span_px(
     return max(0.0, intervals[-1].end_local_x - intervals[0].start_local_x)
 
 
-def _largest_gap_bounded_cluster(
-    intervals: list[ObjectInterval],
-    max_internal_gap_px: float,
-) -> list[ObjectInterval]:
-    """Split intervals where the gap exceeds the limit; keep the widest run.
-
-    This prevents a remote dark region from being merged into the wire bundle
-    envelope across a large internal gap. Internal wire-bundle spaces below the
-    limit are preserved.
-    """
-    if len(intervals) < 2:
-        return intervals
-    clusters: list[list[ObjectInterval]] = [[intervals[0]]]
-    for interval in intervals[1:]:
-        gap = interval.start_local_x - clusters[-1][-1].end_local_x
-        if gap <= max_internal_gap_px:
-            clusters[-1].append(interval)
-        else:
-            clusters.append([interval])
-    return max(
-        clusters,
-        key=lambda cluster: cluster[-1].end_local_x - cluster[0].start_local_x,
-    )
-
-
 def _interval_gaps(intervals: list[ObjectInterval]) -> list[float]:
     return [
         max(0.0, right.start_local_x - left.end_local_x)
         for left, right in zip(intervals, intervals[1:], strict=False)
     ]
+
+
+def _bundle_clusters(
+    intervals: list[ObjectInterval],
+    max_internal_gap_px: float | None,
+) -> tuple[list[_BundleCluster], list[float]]:
+    if not intervals:
+        return [], []
+    gaps = _interval_gaps(intervals)
+    clusters: list[list[ObjectInterval]] = []
+    current: list[ObjectInterval] = []
+    for index, interval in enumerate(intervals):
+        gap_to_previous = gaps[index - 1] if index > 0 else None
+        starts_new_cluster = (
+            bool(current)
+            and max_internal_gap_px is not None
+            and gap_to_previous is not None
+            and gap_to_previous > max_internal_gap_px
+        )
+        if starts_new_cluster:
+            clusters.append(current)
+            current = []
+        current.append(interval)
+    if current:
+        clusters.append(current)
+
+    annotated_clusters: list[_BundleCluster] = []
+    interval_index = 0
+    for cluster_id, cluster in enumerate(clusters):
+        annotated_intervals: list[ObjectInterval] = []
+        for interval in cluster:
+            gap_to_previous = gaps[interval_index - 1] if interval_index > 0 else None
+            annotated_intervals.append(
+                interval.model_copy(
+                    update={
+                        "cluster_id": cluster_id,
+                        "gap_to_previous_px": gap_to_previous,
+                    }
+                )
+            )
+            interval_index += 1
+        annotated_clusters.append(
+            _make_bundle_cluster(cluster_id=cluster_id, intervals=annotated_intervals)
+        )
+    return annotated_clusters, gaps
+
+
+def _make_bundle_cluster(cluster_id: int, intervals: list[ObjectInterval]) -> _BundleCluster:
+    start = intervals[0].start_local_x
+    end = intervals[-1].end_local_x
+    outer_span = max(0.0, end - start)
+    total_width = sum(interval.width_px for interval in intervals)
+    gaps = _interval_gaps(intervals)
+    return _BundleCluster(
+        cluster_id=cluster_id,
+        intervals=intervals,
+        start_local_x=start,
+        end_local_x=end,
+        outer_span_px=outer_span,
+        total_interval_width_px=total_width,
+        support_ratio=total_width / max(outer_span, 1.0),
+        max_internal_gap_px=max(gaps) if gaps else 0.0,
+    )
+
+
+def _select_bundle_cluster(
+    clusters: list[_BundleCluster],
+    *,
+    min_interval_count: int,
+) -> _BundleCluster | None:
+    legal_clusters = [
+        cluster for cluster in clusters if len(cluster.intervals) >= min_interval_count
+    ]
+    if not legal_clusters:
+        return None
+    return max(
+        legal_clusters,
+        key=lambda cluster: (
+            cluster.outer_span_px,
+            cluster.support_ratio,
+            len(cluster.intervals),
+            -abs((cluster.start_local_x + cluster.end_local_x) / 2.0),
+        ),
+    )
+
+
+def _bundle_cluster_diagnostics(
+    clusters: list[_BundleCluster],
+    *,
+    selected_cluster_id: int | None,
+    min_interval_count: int,
+) -> list[BundleClusterDiagnostics]:
+    diagnostics: list[BundleClusterDiagnostics] = []
+    for cluster in clusters:
+        selected = cluster.cluster_id == selected_cluster_id
+        reject_reason = None
+        if not selected:
+            reject_reason = (
+                "insufficient_bundle_support"
+                if len(cluster.intervals) < min_interval_count
+                else "remote_gap_exceeded"
+            )
+        diagnostics.append(
+            BundleClusterDiagnostics(
+                cluster_id=cluster.cluster_id,
+                interval_count=len(cluster.intervals),
+                start_local_x=cluster.start_local_x,
+                end_local_x=cluster.end_local_x,
+                outer_span_px=cluster.outer_span_px,
+                total_interval_width_px=cluster.total_interval_width_px,
+                support_ratio=cluster.support_ratio,
+                max_internal_gap_px=cluster.max_internal_gap_px,
+                selected=selected,
+                reject_reason=reject_reason,
+            )
+        )
+    return diagnostics
+
+
+def _rejected_remote_intervals(
+    clusters: list[_BundleCluster],
+    *,
+    selected_cluster_id: int | None,
+) -> tuple[list[ObjectInterval], list[str]]:
+    rejected: list[ObjectInterval] = []
+    reasons: list[str] = []
+    for cluster in clusters:
+        if cluster.cluster_id == selected_cluster_id:
+            continue
+        for interval in cluster.intervals:
+            reason = "remote_gap_exceeded"
+            rejected.append(
+                interval.model_copy(
+                    update={
+                        "rejected": True,
+                        "reject_reason": reason,
+                    }
+                )
+            )
+            reasons.append(reason)
+    return rejected, reasons
 
 
 def _neighbor_support_line_count(
@@ -1069,6 +1259,7 @@ def _neighbor_support_line_count(
     min_interval_width_px: float,
     max_interval_width_ratio: float,
     line_step_px: float,
+    neighbor_interval_lookup: Callable[[float], list[ObjectInterval]] | None = None,
 ) -> int:
     support = 0
     selected_start = selected_intervals[0].start_local_x
@@ -1076,9 +1267,13 @@ def _neighbor_support_line_count(
     for neighbor_y in (local_y - line_step_px, local_y + line_step_px):
         if abs(neighbor_y) > roi.height / 2.0:
             continue
-        line_mask, local_x_values = _sample_mask_line(foreground, roi, neighbor_y)
+        if neighbor_interval_lookup is not None:
+            raw_intervals = neighbor_interval_lookup(neighbor_y)
+        else:
+            line_mask, local_x_values = _sample_mask_line(foreground, roi, neighbor_y)
+            raw_intervals = _line_intervals(line_mask, local_x_values, neighbor_y)
         intervals = _valid_mesh_intervals(
-            _line_intervals(line_mask, local_x_values, neighbor_y),
+            raw_intervals,
             roi=roi,
             boundary_margin_px=boundary_margin_px,
             min_interval_width_px=min_interval_width_px,
@@ -1144,6 +1339,7 @@ def _build_mesh_outer_span_candidate(
     detected_pattern: str,
     selected_line_reason: str,
     max_internal_gap_px: float | None = None,
+    neighbor_interval_lookup: Callable[[float], list[ObjectInterval]] | None = None,
 ) -> _LineCandidate | None:
     supported_intervals = _valid_mesh_intervals(
         intervals,
@@ -1164,10 +1360,27 @@ def _build_mesh_outer_span_candidate(
         valid_intervals = supported_intervals
     if len(valid_intervals) < min_interval_count:
         return None
-    if max_internal_gap_px is not None:
-        valid_intervals = _largest_gap_bounded_cluster(valid_intervals, max_internal_gap_px)
-        if len(valid_intervals) < min_interval_count:
+    clusters, all_gaps = _bundle_clusters(valid_intervals, max_internal_gap_px)
+    selected_cluster = _select_bundle_cluster(
+        clusters,
+        min_interval_count=min_interval_count,
+    )
+    if selected_cluster is None:
+        touches_boundary = any(
+            interval.start_local_x + roi.width / 2.0 <= boundary_margin_px
+            or roi.width / 2.0 - interval.end_local_x <= boundary_margin_px
+            for interval in valid_intervals
+        )
+        if not touches_boundary:
             return None
+        boundary_clusters, all_gaps = _bundle_clusters(valid_intervals, None)
+        selected_cluster = boundary_clusters[0]
+        clusters = boundary_clusters
+    valid_intervals = selected_cluster.intervals
+    rejected_remote, rejected_remote_reasons = _rejected_remote_intervals(
+        clusters,
+        selected_cluster_id=selected_cluster.cluster_id,
+    )
     has_boundary_contact = any(
         interval.start_local_x + roi.width / 2.0 <= boundary_margin_px
         or roi.width / 2.0 - interval.end_local_x <= boundary_margin_px
@@ -1186,16 +1399,17 @@ def _build_mesh_outer_span_candidate(
             min_interval_width_px=min_interval_width_px,
             max_interval_width_ratio=max_interval_width_ratio,
             line_step_px=line_step_px,
+            neighbor_interval_lookup=neighbor_interval_lookup,
         )
         if neighbor_support < min_neighbor_support_lines:
             return None
 
     leftmost = valid_intervals[0]
     rightmost = valid_intervals[-1]
-    mesh_outer_span = max(0.0, rightmost.end_local_x - leftmost.start_local_x)
+    mesh_outer_span = selected_cluster.outer_span_px
     gaps = _interval_gaps(valid_intervals)
-    total_support_width = sum(interval.width_px for interval in valid_intervals)
-    coverage_ratio = total_support_width / max(mesh_outer_span, 1.0)
+    total_support_width = selected_cluster.total_interval_width_px
+    coverage_ratio = selected_cluster.support_ratio
     left_margin = leftmost.start_local_x + roi.width / 2.0
     right_margin = roi.width / 2.0 - rightmost.end_local_x
     max_gap = max(gaps) if gaps else 0.0
@@ -1221,6 +1435,22 @@ def _build_mesh_outer_span_candidate(
         selected_valid_intervals=valid_intervals,
         leftmost_valid_interval=leftmost,
         rightmost_valid_interval=rightmost,
+        interval_gaps=all_gaps,
+        bundle_cluster_count=len(clusters),
+        bundle_clusters=_bundle_cluster_diagnostics(
+            clusters,
+            selected_cluster_id=selected_cluster.cluster_id,
+            min_interval_count=min_interval_count,
+        ),
+        selected_bundle_cluster_id=selected_cluster.cluster_id,
+        selected_bundle_interval_count=len(selected_cluster.intervals),
+        selected_bundle_outer_span_px=selected_cluster.outer_span_px,
+        selected_bundle_support_ratio=selected_cluster.support_ratio,
+        selected_bundle_max_internal_gap_px=selected_cluster.max_internal_gap_px,
+        max_bundle_internal_gap_px=max_internal_gap_px,
+        rejected_remote_intervals=rejected_remote or None,
+        rejected_remote_interval_reasons=rejected_remote_reasons or None,
+        remote_interval_rejection_count=len(rejected_remote),
         formal_point_a_source_interval=leftmost,
         formal_point_b_source_interval=rightmost,
         point_a_on_foreground_boundary=True,
@@ -1282,6 +1512,18 @@ def _candidate_from_local_span(
     selected_valid_intervals: list[ObjectInterval] | None = None,
     leftmost_valid_interval: ObjectInterval | None = None,
     rightmost_valid_interval: ObjectInterval | None = None,
+    interval_gaps: list[float] | None = None,
+    bundle_cluster_count: int | None = None,
+    bundle_clusters: list[BundleClusterDiagnostics] | None = None,
+    selected_bundle_cluster_id: int | None = None,
+    selected_bundle_interval_count: int | None = None,
+    selected_bundle_outer_span_px: float | None = None,
+    selected_bundle_support_ratio: float | None = None,
+    selected_bundle_max_internal_gap_px: float | None = None,
+    max_bundle_internal_gap_px: float | None = None,
+    rejected_remote_intervals: list[ObjectInterval] | None = None,
+    rejected_remote_interval_reasons: list[str] | None = None,
+    remote_interval_rejection_count: int | None = None,
     formal_point_a_source_interval: ObjectInterval | None = None,
     formal_point_b_source_interval: ObjectInterval | None = None,
     point_a_on_foreground_boundary: bool | None = None,
@@ -1333,6 +1575,18 @@ def _candidate_from_local_span(
         selected_valid_intervals=selected_valid_intervals,
         leftmost_valid_interval=leftmost_valid_interval,
         rightmost_valid_interval=rightmost_valid_interval,
+        interval_gaps=interval_gaps,
+        bundle_cluster_count=bundle_cluster_count,
+        bundle_clusters=bundle_clusters,
+        selected_bundle_cluster_id=selected_bundle_cluster_id,
+        selected_bundle_interval_count=selected_bundle_interval_count,
+        selected_bundle_outer_span_px=selected_bundle_outer_span_px,
+        selected_bundle_support_ratio=selected_bundle_support_ratio,
+        selected_bundle_max_internal_gap_px=selected_bundle_max_internal_gap_px,
+        max_bundle_internal_gap_px=max_bundle_internal_gap_px,
+        rejected_remote_intervals=rejected_remote_intervals,
+        rejected_remote_interval_reasons=rejected_remote_interval_reasons,
+        remote_interval_rejection_count=remote_interval_rejection_count,
         formal_point_a_source_interval=formal_point_a_source_interval,
         formal_point_b_source_interval=formal_point_b_source_interval,
         point_a_on_foreground_boundary=point_a_on_foreground_boundary,
@@ -1417,6 +1671,18 @@ def _replace_rejected_side(candidate: _LineCandidate, rejected_side: str | None)
         selected_valid_intervals=candidate.selected_valid_intervals,
         leftmost_valid_interval=candidate.leftmost_valid_interval,
         rightmost_valid_interval=candidate.rightmost_valid_interval,
+        interval_gaps=candidate.interval_gaps,
+        bundle_cluster_count=candidate.bundle_cluster_count,
+        bundle_clusters=candidate.bundle_clusters,
+        selected_bundle_cluster_id=candidate.selected_bundle_cluster_id,
+        selected_bundle_interval_count=candidate.selected_bundle_interval_count,
+        selected_bundle_outer_span_px=candidate.selected_bundle_outer_span_px,
+        selected_bundle_support_ratio=candidate.selected_bundle_support_ratio,
+        selected_bundle_max_internal_gap_px=candidate.selected_bundle_max_internal_gap_px,
+        max_bundle_internal_gap_px=candidate.max_bundle_internal_gap_px,
+        rejected_remote_intervals=candidate.rejected_remote_intervals,
+        rejected_remote_interval_reasons=candidate.rejected_remote_interval_reasons,
+        remote_interval_rejection_count=candidate.remote_interval_rejection_count,
         formal_point_a_source_interval=candidate.formal_point_a_source_interval,
         formal_point_b_source_interval=candidate.formal_point_b_source_interval,
         point_a_on_foreground_boundary=candidate.point_a_on_foreground_boundary,
@@ -1465,6 +1731,18 @@ def _candidate_to_selection(candidate: _LineCandidate) -> ContactSelection:
         selected_valid_intervals=candidate.selected_valid_intervals,
         leftmost_valid_interval=candidate.leftmost_valid_interval,
         rightmost_valid_interval=candidate.rightmost_valid_interval,
+        interval_gaps=candidate.interval_gaps,
+        bundle_cluster_count=candidate.bundle_cluster_count,
+        bundle_clusters=candidate.bundle_clusters,
+        selected_bundle_cluster_id=candidate.selected_bundle_cluster_id,
+        selected_bundle_interval_count=candidate.selected_bundle_interval_count,
+        selected_bundle_outer_span_px=candidate.selected_bundle_outer_span_px,
+        selected_bundle_support_ratio=candidate.selected_bundle_support_ratio,
+        selected_bundle_max_internal_gap_px=candidate.selected_bundle_max_internal_gap_px,
+        max_bundle_internal_gap_px=candidate.max_bundle_internal_gap_px,
+        rejected_remote_intervals=candidate.rejected_remote_intervals,
+        rejected_remote_interval_reasons=candidate.rejected_remote_interval_reasons,
+        remote_interval_rejection_count=candidate.remote_interval_rejection_count,
         formal_point_a_source_interval=candidate.formal_point_a_source_interval,
         formal_point_b_source_interval=candidate.formal_point_b_source_interval,
         point_a_on_foreground_boundary=candidate.point_a_on_foreground_boundary,
@@ -1514,6 +1792,18 @@ def _candidate_to_debug(
         selected_valid_intervals=candidate.selected_valid_intervals,
         leftmost_valid_interval=candidate.leftmost_valid_interval,
         rightmost_valid_interval=candidate.rightmost_valid_interval,
+        interval_gaps=candidate.interval_gaps,
+        bundle_cluster_count=candidate.bundle_cluster_count,
+        bundle_clusters=candidate.bundle_clusters,
+        selected_bundle_cluster_id=candidate.selected_bundle_cluster_id,
+        selected_bundle_interval_count=candidate.selected_bundle_interval_count,
+        selected_bundle_outer_span_px=candidate.selected_bundle_outer_span_px,
+        selected_bundle_support_ratio=candidate.selected_bundle_support_ratio,
+        selected_bundle_max_internal_gap_px=candidate.selected_bundle_max_internal_gap_px,
+        max_bundle_internal_gap_px=candidate.max_bundle_internal_gap_px,
+        rejected_remote_intervals=candidate.rejected_remote_intervals,
+        rejected_remote_interval_reasons=candidate.rejected_remote_interval_reasons,
+        remote_interval_rejection_count=candidate.remote_interval_rejection_count,
         formal_point_a_source_interval=candidate.formal_point_a_source_interval,
         formal_point_b_source_interval=candidate.formal_point_b_source_interval,
         point_a_on_foreground_boundary=candidate.point_a_on_foreground_boundary,
@@ -1562,6 +1852,18 @@ def _chord_debug(
     selected_valid_intervals: list[ObjectInterval] | None = None,
     leftmost_valid_interval: ObjectInterval | None = None,
     rightmost_valid_interval: ObjectInterval | None = None,
+    interval_gaps: list[float] | None = None,
+    bundle_cluster_count: int | None = None,
+    bundle_clusters: list[BundleClusterDiagnostics] | None = None,
+    selected_bundle_cluster_id: int | None = None,
+    selected_bundle_interval_count: int | None = None,
+    selected_bundle_outer_span_px: float | None = None,
+    selected_bundle_support_ratio: float | None = None,
+    selected_bundle_max_internal_gap_px: float | None = None,
+    max_bundle_internal_gap_px: float | None = None,
+    rejected_remote_intervals: list[ObjectInterval] | None = None,
+    rejected_remote_interval_reasons: list[str] | None = None,
+    remote_interval_rejection_count: int | None = None,
     formal_point_a_source_interval: ObjectInterval | None = None,
     formal_point_b_source_interval: ObjectInterval | None = None,
     point_a_on_foreground_boundary: bool | None = None,
@@ -1609,6 +1911,18 @@ def _chord_debug(
         selected_valid_intervals=selected_valid_intervals,
         leftmost_valid_interval=leftmost_valid_interval,
         rightmost_valid_interval=rightmost_valid_interval,
+        interval_gaps=interval_gaps,
+        bundle_cluster_count=bundle_cluster_count,
+        bundle_clusters=bundle_clusters,
+        selected_bundle_cluster_id=selected_bundle_cluster_id,
+        selected_bundle_interval_count=selected_bundle_interval_count,
+        selected_bundle_outer_span_px=selected_bundle_outer_span_px,
+        selected_bundle_support_ratio=selected_bundle_support_ratio,
+        selected_bundle_max_internal_gap_px=selected_bundle_max_internal_gap_px,
+        max_bundle_internal_gap_px=max_bundle_internal_gap_px,
+        rejected_remote_intervals=rejected_remote_intervals,
+        rejected_remote_interval_reasons=rejected_remote_interval_reasons,
+        remote_interval_rejection_count=remote_interval_rejection_count,
         formal_point_a_source_interval=formal_point_a_source_interval,
         formal_point_b_source_interval=formal_point_b_source_interval,
         point_a_on_foreground_boundary=point_a_on_foreground_boundary,

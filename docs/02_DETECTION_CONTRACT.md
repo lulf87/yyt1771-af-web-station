@@ -182,6 +182,12 @@ blank | wire_1 | gap | wire_2 | gap | wire_3 | blank
 
 These gaps are internal wire-bundle spaces, not multiple independent measurement objects.
 
+Valid intervals on the same line are split into bundle clusters when an
+internal gap exceeds the configured bundle-gap threshold. Formal A/B may only
+come from the selected bundle cluster. Intervals split away from that cluster
+are rejected as remote intervals and must not extend B, even if they are
+high-contrast foreground.
+
 A is the left outer boundary of the leftmost valid wire interval on the selected ROI-local measurement line.
 B is the right outer boundary of the rightmost valid wire interval on the same ROI-local measurement line.
 ```
@@ -203,10 +209,17 @@ Wire foreground filtering (formal):
 ```text
 Before line scanning, the general foreground mask is reduced to a trusted wire
 foreground by component-level filtering: area bounds, slenderness / aspect ratio,
-orientation tolerance, local contrast, and broad-blob rejection. Background blobs
-(e.g. a screw hole or a gray non-target region) are removed before A/B selection,
-so they cannot extend the formal bundle outer span. Internal wire-bundle gaps are
-capped so disjoint non-wire regions are not merged into one bundle.
+local contrast, neighbor-line support, internal-gap limits, and broad-blob
+rejection. Background blobs (e.g. a screw hole or a gray non-target region) are
+removed before A/B selection, so they cannot extend the formal bundle outer span.
+Orientation and aspect ratio are recorded and scored for diagnostics in this
+stage; orientation is not a hard rejection gate because real wire bundles can
+curve, split, and fan out. Internal wire-bundle gaps are capped so disjoint
+non-wire regions are not merged into one bundle.
+
+The bundle-gap threshold is recorded separately from the selected cluster's
+actual `max_internal_gap_px`. `max_bundle_internal_gap_px` is the effective
+threshold used to split clusters.
 ```
 
 Setup-only threshold tuning: fixed thresholds are fragile, so the setup phase may

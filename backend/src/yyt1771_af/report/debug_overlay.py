@@ -224,6 +224,16 @@ def render_detection_debug_overlay_png(
         pixels,
         display_width,
         scaled_roi,
+        detection.diagnostics.rejected_remote_intervals,
+        measurement_line_y,
+        scale_x,
+        (255, 96, 96),
+        thickness=2,
+    )
+    _draw_interval_segments(
+        pixels,
+        display_width,
+        scaled_roi,
         detection.diagnostics.selected_valid_intervals,
         measurement_line_y,
         scale_x,

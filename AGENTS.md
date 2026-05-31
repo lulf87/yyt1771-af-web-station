@@ -140,5 +140,6 @@ A task is done only when:
 - Tests are added or updated.
 - Tests and lint pass or failures are clearly explained.
 - Every fix is confirmed in a real browser when it affects the Web UI or user-facing API flow; report the browser URL, action taken, and observed result. If browser confirmation is impossible, state the blocker explicitly.
+- After any backend or frontend code change, restart the affected local backend/frontend dev service after the change is complete, and explicitly tell the user which service was restarted, the URL/port, and whether restart succeeded. If restart is not possible, report the blocker explicitly.
 - No old-project references are introduced, except the approved read-only validation material listed above.
 - macOS/Windows portability rules remain satisfied.

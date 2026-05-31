@@ -125,6 +125,11 @@ class OfflineRunTraceEntry(BaseModel):
     measurement_line_y: float | None = None
     formal_ab_span_px: float | None = None
     selected_valid_intervals: list[dict[str, float | None]] | None = None
+    rejected_remote_intervals: list[dict[str, float | None]] | None = None
+    selected_bundle_cluster_id: int | None = None
+    selected_bundle_outer_span_px: float | None = None
+    max_bundle_internal_gap_px: float | None = None
+    remote_interval_rejection_count: int | None = None
     point_a: dict[str, Any] | None = None
     point_b: dict[str, Any] | None = None
     point_a_on_foreground_boundary: bool | None = None
@@ -715,6 +720,21 @@ class OfflineRunService:
                 selected_valid_intervals=_interval_summary(
                     diagnostics.get("selected_valid_intervals")
                 ),
+                rejected_remote_intervals=_interval_summary(
+                    diagnostics.get("rejected_remote_intervals")
+                ),
+                selected_bundle_cluster_id=_optional_int(
+                    diagnostics.get("selected_bundle_cluster_id")
+                ),
+                selected_bundle_outer_span_px=_optional_float(
+                    diagnostics.get("selected_bundle_outer_span_px")
+                ),
+                max_bundle_internal_gap_px=_optional_float(
+                    diagnostics.get("max_bundle_internal_gap_px")
+                ),
+                remote_interval_rejection_count=_optional_int(
+                    diagnostics.get("remote_interval_rejection_count")
+                ),
                 point_a=_point_payload(detection.get("point_a")),
                 point_b=_point_payload(detection.get("point_b")),
                 point_a_on_foreground_boundary=_optional_bool(
@@ -806,6 +826,12 @@ def _looks_like_unsupported_frame_format(exc: ValueError) -> bool:
 def _optional_float(value: Any) -> float | None:
     if isinstance(value, int | float):
         return float(value)
+    return None
+
+
+def _optional_int(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
     return None
 
 

@@ -42,12 +42,6 @@ from yyt1771_af.vision.wire_filtering import (
     analyze_wire_components,
 )
 
-# Internal wire-bundle spaces below this fraction of the ROI width are kept;
-# larger gaps are treated as separation from non-target regions and split.
-# Kept generous because component-level filtering already removes broad
-# background blobs; this is only a coarse secondary guard.
-_WIRE_MAX_INTERNAL_GAP_RATIO = 0.9
-
 
 class WireStripDetector:
     detector_kind = DetectorKind.WIRE_STRIP_DETECTOR
@@ -172,8 +166,10 @@ class WireStripDetector:
             roi_mask=roi_mask,
             foreground=foreground,
             components=components,
+            params=params,
         )
         timings_ms["wire_filtering_ms"] = elapsed_ms(wire_filtering_start)
+        bundle_internal_gap_px = _effective_bundle_internal_gap_px(params, roi)
         recipe_diagnostics = {
             "boundary_margin_px": params.boundary_margin_px,
             "roi_half_width": roi.width / 2.0,
@@ -184,6 +180,11 @@ class WireStripDetector:
             "close_kernel": segmentation.close_kernel,
             "open_kernel": segmentation.open_kernel,
             "min_component_area_px": segmentation.min_component_area_px,
+            "max_internal_gap_px": params.max_internal_gap_px
+            if params.max_internal_gap_px is not None
+            else params.max_internal_gap_ratio * roi.width,
+            "max_bundle_internal_gap_px": bundle_internal_gap_px,
+            "max_bundle_internal_gap_ratio": params.max_bundle_internal_gap_ratio,
         } | _wire_likeness_diagnostics(wire_analysis)
 
         # Phase 2: the formal line scan runs on the filtered wire foreground so
@@ -223,11 +224,20 @@ class WireStripDetector:
             source_layer="wire_foreground",
             raw_foreground_mask=foreground,
             bridged_foreground_mask=wire_foreground,
-            min_mesh_interval_count=2,
+            min_mesh_interval_width_px=params.min_interval_width_px,
+            min_mesh_interval_count=params.min_valid_interval_count,
+            max_mesh_interval_width_ratio=params.max_interval_width_ratio,
+            min_neighbor_support_lines=(
+                params.min_neighbor_line_support
+                if params.enable_neighbor_line_support_filter
+                else 0
+            ),
             bundle_detected_pattern="wire_bundle_envelope",
             prefer_largest_formal_span=True,
             reject_global_foreground_boundary=False,
-            max_internal_gap_px=_WIRE_MAX_INTERNAL_GAP_RATIO * roi.width,
+            max_internal_gap_px=(
+                bundle_internal_gap_px if params.enable_remote_interval_rejection else None
+            ),
             compute_debug_intervals=wants_full,
             timings_ms=selection_timings,
         )
@@ -328,6 +338,20 @@ class WireStripDetector:
                 "selected_valid_intervals": selection.selected_valid_intervals,
                 "leftmost_valid_interval": selection.leftmost_valid_interval,
                 "rightmost_valid_interval": selection.rightmost_valid_interval,
+                "interval_gaps": selection.interval_gaps,
+                "bundle_cluster_count": selection.bundle_cluster_count,
+                "bundle_clusters": selection.bundle_clusters,
+                "selected_bundle_cluster_id": selection.selected_bundle_cluster_id,
+                "selected_bundle_interval_count": selection.selected_bundle_interval_count,
+                "selected_bundle_outer_span_px": selection.selected_bundle_outer_span_px,
+                "selected_bundle_support_ratio": selection.selected_bundle_support_ratio,
+                "selected_bundle_max_internal_gap_px": (
+                    selection.selected_bundle_max_internal_gap_px
+                ),
+                "max_bundle_internal_gap_px": selection.max_bundle_internal_gap_px,
+                "rejected_remote_intervals": selection.rejected_remote_intervals,
+                "rejected_remote_interval_reasons": selection.rejected_remote_interval_reasons,
+                "remote_interval_rejection_count": selection.remote_interval_rejection_count,
                 "formal_point_a_source_interval": selection.formal_point_a_source_interval,
                 "formal_point_b_source_interval": selection.formal_point_b_source_interval,
                 "point_a_on_foreground_boundary": selection.point_a_on_foreground_boundary,
@@ -387,13 +411,32 @@ class WireStripDetector:
         )
 
 
+def _effective_bundle_internal_gap_px(
+    params: WireStripDetectorParams,
+    roi: RotatedRoi,
+) -> float:
+    ratio_limit = params.max_bundle_internal_gap_ratio * roi.width
+    if params.max_bundle_internal_gap_px is None:
+        return float(ratio_limit)
+    return float(min(params.max_bundle_internal_gap_px, ratio_limit))
+
+
 def _wire_likeness_diagnostics(analysis: WireForegroundAnalysis) -> dict[str, object]:
+    primary = _primary_metric(analysis)
+    component_orientation = primary.orientation_deg if primary is not None else None
     return {
         "broad_blob_rejection_count": analysis.broad_blob_rejection_count,
         "broad_blob_area_ratio": analysis.broad_blob_area_ratio,
+        "local_contrast_score": primary.local_contrast if primary is not None else None,
         "wire_likeness_score": analysis.primary_wire_likeness_score,
+        "component_area_px": primary.area_px if primary is not None else None,
+        "component_bbox": primary.bbox if primary is not None else None,
         "component_aspect_ratio": analysis.primary_aspect_ratio,
-        "component_orientation": analysis.primary_orientation_deg,
+        "component_orientation": component_orientation,
+        "component_orientation_deg": component_orientation,
+        "orientation_deviation_deg": (
+            primary.orientation_deviation_deg if primary is not None else None
+        ),
     }
 
 
@@ -414,8 +457,21 @@ def _rejected_interval_diagnostics(
         center_local_x = (interval.start_local_x + interval.end_local_x) / 2.0
         if _point_in_mask(analysis.wire_foreground, roi, center_local_x, line_y):
             continue
-        rejected.append(interval)
-        reasons.append(_reject_reason_at(components, analysis.metrics, roi, center_local_x, line_y))
+        metric = _reject_metric_at(components, analysis.metrics, roi, center_local_x, line_y)
+        reason = metric.reject_reason if metric is not None else "background"
+        rejected.append(
+            interval.model_copy(
+                update={
+                    "rejected": True,
+                    "reject_reason": reason,
+                    "local_contrast_score": metric.local_contrast if metric else None,
+                    "wire_likeness_score": metric.wire_likeness_score if metric else None,
+                    "source_component_id": metric.component_id if metric else None,
+                    "touches_roi_boundary": _interval_touches_roi_boundary(interval, roi),
+                }
+            )
+        )
+        reasons.append(reason)
     if not rejected:
         return {}
     return {"rejected_intervals": rejected, "rejected_interval_reasons": reasons}
@@ -430,13 +486,13 @@ def _point_in_mask(mask: np.ndarray, roi: RotatedRoi, local_x: float, local_y: f
     return bool(mask[py, px])
 
 
-def _reject_reason_at(
+def _reject_metric_at(
     components: list[BinaryComponent],
     metrics: list[WireComponentMetric],
     roi: RotatedRoi,
     local_x: float,
     local_y: float,
-) -> str:
+) -> WireComponentMetric | None:
     point = roi_local_to_acquisition_point(roi, local_x, local_y)
     px = int(round(point.x))
     py = int(round(point.y))
@@ -444,8 +500,23 @@ def _reject_reason_at(
         if not (0 <= py < component.mask.shape[0] and 0 <= px < component.mask.shape[1]):
             continue
         if component.mask[py, px] and not metric.accepted:
-            return metric.reject_reason or "rejected"
-    return "background"
+            return metric
+    return None
+
+
+def _primary_metric(analysis: WireForegroundAnalysis) -> WireComponentMetric | None:
+    accepted = [metric for metric in analysis.metrics if metric.accepted]
+    if accepted:
+        return max(accepted, key=lambda metric: metric.wire_likeness_score)
+    if analysis.metrics:
+        return max(analysis.metrics, key=lambda metric: metric.wire_likeness_score)
+    return None
+
+
+def _interval_touches_roi_boundary(interval: object, roi: RotatedRoi) -> bool:
+    start = getattr(interval, "start_local_x", 0.0)
+    end = getattr(interval, "end_local_x", 0.0)
+    return bool(start <= -roi.width / 2.0 or end >= roi.width / 2.0)
 
 
 def _segmentation_diagnostics(segmentation_debug: object) -> dict[str, object]:
@@ -495,6 +566,18 @@ def _contact_diagnostics(contact_debug: object) -> dict[str, object]:
         "selected_valid_intervals": contact_debug.selected_valid_intervals,
         "leftmost_valid_interval": contact_debug.leftmost_valid_interval,
         "rightmost_valid_interval": contact_debug.rightmost_valid_interval,
+        "interval_gaps": contact_debug.interval_gaps,
+        "bundle_cluster_count": contact_debug.bundle_cluster_count,
+        "bundle_clusters": contact_debug.bundle_clusters,
+        "selected_bundle_cluster_id": contact_debug.selected_bundle_cluster_id,
+        "selected_bundle_interval_count": contact_debug.selected_bundle_interval_count,
+        "selected_bundle_outer_span_px": contact_debug.selected_bundle_outer_span_px,
+        "selected_bundle_support_ratio": contact_debug.selected_bundle_support_ratio,
+        "selected_bundle_max_internal_gap_px": contact_debug.selected_bundle_max_internal_gap_px,
+        "max_bundle_internal_gap_px": contact_debug.max_bundle_internal_gap_px,
+        "rejected_remote_intervals": contact_debug.rejected_remote_intervals,
+        "rejected_remote_interval_reasons": contact_debug.rejected_remote_interval_reasons,
+        "remote_interval_rejection_count": contact_debug.remote_interval_rejection_count,
         "formal_point_a_source_interval": contact_debug.formal_point_a_source_interval,
         "formal_point_b_source_interval": contact_debug.formal_point_b_source_interval,
         "point_a_on_foreground_boundary": contact_debug.point_a_on_foreground_boundary,

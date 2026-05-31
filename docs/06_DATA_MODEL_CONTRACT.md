@@ -124,6 +124,26 @@ class WireStripDetectorParams(BaseModel):
     require_physical_endpoints: Literal[False] = False
     skeleton_endpoint_detection: Literal[False] = False
     preserve_visible_strip_contour: bool = True
+    min_interval_width_px: float = 3.0
+    max_interval_width_ratio: float = 0.65
+    min_valid_interval_count: int = 2
+    min_local_contrast_score: float = 8.0
+    min_wire_likeness_score: float = 0.0
+    max_broad_blob_area_ratio: float = 0.22
+    max_component_area_ratio: float = 0.45
+    min_component_area_px: int | None = None
+    max_internal_gap_px: float | None = None
+    max_internal_gap_ratio: float = 0.9
+    max_bundle_internal_gap_px: float | None = 60.0
+    max_bundle_internal_gap_ratio: float = 1.0
+    min_neighbor_line_support: int = 1
+    component_aspect_ratio_min: float = 1.8
+    broad_blob_max_aspect_ratio: float = 1.8
+    enable_broad_blob_rejection: bool = True
+    enable_local_contrast_filter: bool = True
+    enable_neighbor_line_support_filter: bool = True
+    enable_remote_interval_rejection: bool = True
+    enable_orientation_scoring: bool = True
 
 class BalloonEnvelopeRecipe(BaseModel):
     name: str
@@ -191,15 +211,33 @@ class DetectionDiagnostics(BaseModel):
     selected_valid_intervals: list[dict] | None = None
     rejected_intervals: list[dict] | None = None
     rejected_interval_reasons: list[str] | None = None
+    interval_gaps: list[float] | None = None
+    bundle_cluster_count: int | None = None
+    bundle_clusters: list[dict] | None = None
+    selected_bundle_cluster_id: int | None = None
+    selected_bundle_interval_count: int | None = None
+    selected_bundle_outer_span_px: float | None = None
+    selected_bundle_support_ratio: float | None = None
+    selected_bundle_max_internal_gap_px: float | None = None
+    max_bundle_internal_gap_px: float | None = None
+    max_bundle_internal_gap_ratio: float | None = None
+    rejected_remote_intervals: list[dict] | None = None
+    rejected_remote_interval_reasons: list[str] | None = None
+    remote_interval_rejection_count: int | None = None
     leftmost_valid_interval: dict | None = None
     rightmost_valid_interval: dict | None = None
     formal_point_a_source_interval: dict | None = None
     formal_point_b_source_interval: dict | None = None
     broad_blob_rejection_count: int | None = None
     broad_blob_area_ratio: float | None = None
+    local_contrast_score: float | None = None
     wire_likeness_score: float | None = None
+    component_area_px: int | None = None
+    component_bbox: dict | None = None
     component_aspect_ratio: float | None = None
     component_orientation: float | None = None
+    component_orientation_deg: float | None = None
+    orientation_deviation_deg: float | None = None
     neighbor_line_support: int | None = None
     point_a_on_foreground_boundary: bool | None = None
     point_b_on_foreground_boundary: bool | None = None
@@ -278,6 +316,7 @@ class MeasurementDefinition(BaseModel):
     acquisition_frame_size: AcquisitionFrameSize
     coordinate_space: CoordinateSpace = CoordinateSpace.ACQUISITION
     auto_tuned: bool = False
+    auto_tune_score: float | None = None
     created_at_ms: int
 ```
 

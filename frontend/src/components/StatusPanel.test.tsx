@@ -163,14 +163,31 @@ describe("StatusPanel debug diagnostics", () => {
       diagnostics: {
         measurement_mode: "wire_bundle_envelope",
         threshold_mode: "fixed",
+        local_contrast_score: 8.4,
         wire_likeness_score: 0.82,
+        component_area_px: 1234,
+        component_bbox: { min_x: 10, min_y: 20, max_x: 90, max_y: 120 },
         component_aspect_ratio: 7.5,
         component_orientation: 2.1,
+        component_orientation_deg: 2.1,
+        orientation_deviation_deg: 2.1,
         neighbor_line_support: 9,
         broad_blob_rejection_count: 1,
         broad_blob_area_ratio: 0.34,
         rejected_intervals: [{ start_local_x: 20, end_local_x: 70, width_px: 50 }],
         rejected_interval_reasons: ["broad_blob"],
+        interval_gaps: [12, 173],
+        bundle_cluster_count: 2,
+        selected_bundle_cluster_id: 0,
+        selected_bundle_interval_count: 5,
+        selected_bundle_outer_span_px: 134,
+        selected_bundle_support_ratio: 0.45,
+        selected_bundle_max_internal_gap_px: 36,
+        max_bundle_internal_gap_px: 60,
+        max_bundle_internal_gap_ratio: 1,
+        rejected_remote_intervals: [{ start_local_x: 252, end_local_x: 257, width_px: 5 }],
+        rejected_remote_interval_reasons: ["remote_gap_exceeded"],
+        remote_interval_rejection_count: 1,
       },
     };
 
@@ -180,13 +197,25 @@ describe("StatusPanel debug diagnostics", () => {
 
     expect(markup).toContain("Wire likeness");
     expect(markup).toContain("0.82");
+    expect(markup).toContain("Local contrast");
+    expect(markup).toContain("8.40");
+    expect(markup).toContain("Component bbox");
     expect(markup).toContain("Component aspect ratio");
+    expect(markup).toContain("Component orientation deg");
+    expect(markup).toContain("Orientation deviation");
     expect(markup).toContain("Neighbor line support");
     expect(markup).toContain("Broad blob rejections");
     expect(markup).toContain("Broad blob area ratio");
     expect(markup).toContain("Rejected intervals");
     expect(markup).toContain("Rejected interval reasons");
     expect(markup).toContain("broad_blob");
+    expect(markup).toContain("Interval gaps");
+    expect(markup).toContain("Bundle clusters");
+    expect(markup).toContain("Selected bundle cluster");
+    expect(markup).toContain("Max bundle gap threshold");
+    expect(markup).toContain("Rejected remote intervals");
+    expect(markup).toContain("remote_gap_exceeded");
+    expect(markup).toContain("Remote interval rejections");
     expect(markup).not.toContain("two_strip");
   });
 });

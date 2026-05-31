@@ -90,6 +90,27 @@ class ObjectInterval(BaseModel):
     end_local_x: float
     width_px: float
     line_y: float | None = None
+    cluster_id: int | None = None
+    gap_to_previous_px: float | None = None
+    rejected: bool = False
+    reject_reason: str | None = None
+    local_contrast_score: float | None = None
+    wire_likeness_score: float | None = None
+    source_component_id: int | None = None
+    touches_roi_boundary: bool | None = None
+
+
+class BundleClusterDiagnostics(BaseModel):
+    cluster_id: int
+    interval_count: int
+    start_local_x: float
+    end_local_x: float
+    outer_span_px: float
+    total_interval_width_px: float
+    support_ratio: float
+    max_internal_gap_px: float
+    selected: bool = False
+    reject_reason: str | None = None
 
 
 class BalloonEnvelopeDetectorParams(BaseModel):
@@ -136,6 +157,26 @@ class WireStripDetectorParams(BaseModel):
     require_physical_endpoints: Literal[False] = False
     skeleton_endpoint_detection: Literal[False] = False
     preserve_visible_strip_contour: bool = True
+    min_interval_width_px: float = Field(default=3.0, ge=0.0)
+    max_interval_width_ratio: float = Field(default=0.65, gt=0.0, le=1.0)
+    min_valid_interval_count: int = Field(default=2, gt=0)
+    min_local_contrast_score: float = Field(default=8.0, ge=0.0)
+    min_wire_likeness_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_broad_blob_area_ratio: float = Field(default=0.22, gt=0.0, le=1.0)
+    max_component_area_ratio: float = Field(default=0.45, gt=0.0, le=1.0)
+    min_component_area_px: int | None = Field(default=None, gt=0)
+    max_internal_gap_px: float | None = Field(default=None, gt=0.0)
+    max_internal_gap_ratio: float = Field(default=0.9, gt=0.0, le=1.0)
+    max_bundle_internal_gap_px: float | None = Field(default=60.0, gt=0.0)
+    max_bundle_internal_gap_ratio: float = Field(default=1.0, gt=0.0, le=1.0)
+    min_neighbor_line_support: int = Field(default=1, ge=0)
+    component_aspect_ratio_min: float = Field(default=1.8, ge=1.0)
+    broad_blob_max_aspect_ratio: float = Field(default=1.8, ge=1.0)
+    enable_broad_blob_rejection: bool = True
+    enable_local_contrast_filter: bool = True
+    enable_neighbor_line_support_filter: bool = True
+    enable_remote_interval_rejection: bool = True
+    enable_orientation_scoring: bool = True
 
 
 DetectorParams = Annotated[
@@ -213,15 +254,33 @@ class DetectionDiagnostics(BaseModel):
     selected_valid_intervals: list[ObjectInterval] | None = None
     rejected_intervals: list[ObjectInterval] | None = None
     rejected_interval_reasons: list[str] | None = None
+    interval_gaps: list[float] | None = None
+    bundle_cluster_count: int | None = None
+    bundle_clusters: list[BundleClusterDiagnostics] | None = None
+    selected_bundle_cluster_id: int | None = None
+    selected_bundle_interval_count: int | None = None
+    selected_bundle_outer_span_px: float | None = None
+    selected_bundle_support_ratio: float | None = None
+    selected_bundle_max_internal_gap_px: float | None = None
+    max_bundle_internal_gap_px: float | None = None
+    max_bundle_internal_gap_ratio: float | None = None
+    rejected_remote_intervals: list[ObjectInterval] | None = None
+    rejected_remote_interval_reasons: list[str] | None = None
+    remote_interval_rejection_count: int | None = None
     leftmost_valid_interval: ObjectInterval | None = None
     rightmost_valid_interval: ObjectInterval | None = None
     formal_point_a_source_interval: ObjectInterval | None = None
     formal_point_b_source_interval: ObjectInterval | None = None
     broad_blob_rejection_count: int | None = None
     broad_blob_area_ratio: float | None = None
+    local_contrast_score: float | None = None
     wire_likeness_score: float | None = None
+    component_area_px: int | None = None
+    component_bbox: ComponentBBox | None = None
     component_aspect_ratio: float | None = None
     component_orientation: float | None = None
+    component_orientation_deg: float | None = None
+    orientation_deviation_deg: float | None = None
     neighbor_line_support: int | None = None
     point_a_on_foreground_boundary: bool | None = None
     point_b_on_foreground_boundary: bool | None = None
@@ -384,6 +443,7 @@ class MeasurementDefinition(BaseModel):
     coordinate_space: CoordinateSpace = CoordinateSpace.ACQUISITION
     created_at_ms: int
     auto_tuned: bool = False
+    auto_tune_score: float | None = None
 
     @field_validator("coordinate_space")
     @classmethod

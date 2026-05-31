@@ -212,7 +212,7 @@ Recommended defaults:
 
 `WireStripDetector` remains same-line chord based inside the ROI, not endpoint based. Its current formal pattern is `blank-wire_bundle_envelope-blank` and its only current formal measurement mode is `wire_bundle_envelope`.
 
-For `wire_bundle_envelope`, one ROI-local measurement line may contain multiple valid wire foreground intervals. Internal gaps are wire-bundle spaces, not separate measurement objects and not inner-gap targets. Formal A/B are the left outer boundary of the leftmost valid wire interval and the right outer boundary of the rightmost valid wire interval. They must be real foreground-boundary points, not gap, background, ROI-boundary, virtual-envelope, or rejected/debug points.
+For `wire_bundle_envelope`, one ROI-local measurement line may contain multiple valid wire foreground intervals. Internal gaps are wire-bundle spaces, not separate measurement objects and not inner-gap targets. Intervals are first split into bundle clusters when a gap exceeds the effective `max_bundle_internal_gap_px` threshold. Formal A/B are the left outer boundary of the leftmost valid wire interval and the right outer boundary of the rightmost valid wire interval in the selected cluster. They must be real foreground-boundary points, not gap, background, ROI-boundary, virtual-envelope, rejected remote interval, or rejected/debug points.
 
 Run-time wire detection chooses the current frame's valid candidate line with the largest `formal_ab_span_px`. Previous-frame `measurement_line_y`, A/B jump, and distance jump may be recorded for diagnostics and offline validation, but must not affect formal A/B selection in this stage.
 
@@ -327,6 +327,8 @@ Use these metrics separately for setup tuning, offline validation, and golden-se
 - `chord_length_px`: same-line chord length stability.
 - `mesh_outer_span_px`: open-mesh span from leftmost valid foreground interval to rightmost valid foreground interval.
 - `bundle_outer_span_px`: wire-bundle span from leftmost valid wire foreground interval to rightmost valid wire foreground interval.
+- `bundle_clusters`, `selected_bundle_cluster_id`, `rejected_remote_intervals`, and `remote_interval_rejection_count`: evidence for remote interval rejection.
+- `max_bundle_internal_gap_px`: effective cluster-splitting threshold; `max_internal_gap_px` remains the selected cluster's actual largest internal gap.
 - `formal_ab_span_px`: formal A/B segment length; for open mesh this should match `mesh_outer_span_px`, not `virtual_envelope_span_px`.
 - `virtual_envelope_span_px`: debug-only filled/hull span, never proof of formal A/B validity.
 - `processing_fps`: effective frames per second for offline evaluation.
@@ -468,6 +470,8 @@ The wire robustness/auto-tuning work described above is implemented for
 `wire_strip`:
 
 - Component-level wire foreground filtering: `vision/wire_filtering.py`.
+- Wire-likeness/filtering thresholds are persisted in `WireStripDetectorParams`
+  and therefore become part of the confirmed recipe snapshot.
 - Setup-phase threshold sweep, scoring, and stable-platform selection:
   `vision/wire_auto_tune.py`, exposed via `services/setup_service.py` and
   `POST /api/setup/wire-auto-tune`. The confirmed recipe records `auto_tuned`.

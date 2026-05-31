@@ -32,6 +32,7 @@ from yyt1771_af.vision.segmentation import (
     segment_target_mask_layers_debug,
 )
 from yyt1771_af.vision.wire_auto_tune import auto_tune_wire_threshold
+from yyt1771_af.vision.wire_filtering import analyze_wire_components
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +86,7 @@ class SetupConfirmRequest(BaseModel):
     segmentation: SegmentationParams | None = None
     detector: DetectorParams | None = None
     auto_tuned: bool = False
+    auto_tune_score: float | None = None
 
 
 class SetupConfirmResponse(BaseModel):
@@ -110,8 +112,16 @@ class WireAutoTuneCandidateModel(BaseModel):
     formal_ab_span_px: float | None = None
     valid_interval_count: int | None = None
     rejected_interval_count: int
+    selected_valid_intervals: list[dict[str, Any]]
     broad_blob_rejection_count: int | None = None
+    broad_blob_area_ratio: float | None = None
+    local_contrast_score: float | None = None
     wire_likeness_score: float | None = None
+    neighbor_line_support: int | None = None
+    roi_margin_px: float | None = None
+    point_a_on_foreground_boundary: bool | None = None
+    point_b_on_foreground_boundary: bool | None = None
+    failure_reason: str | None = None
     distance_px: float | None = None
     score: float
     on_stable_platform: bool
@@ -230,8 +240,16 @@ class SetupService:
                     formal_ab_span_px=candidate.formal_ab_span_px,
                     valid_interval_count=candidate.valid_interval_count,
                     rejected_interval_count=candidate.rejected_interval_count,
+                    selected_valid_intervals=candidate.selected_valid_intervals,
                     broad_blob_rejection_count=candidate.broad_blob_rejection_count,
+                    broad_blob_area_ratio=candidate.broad_blob_area_ratio,
+                    local_contrast_score=candidate.local_contrast_score,
                     wire_likeness_score=candidate.wire_likeness_score,
+                    neighbor_line_support=candidate.neighbor_line_support,
+                    roi_margin_px=candidate.roi_margin_px,
+                    point_a_on_foreground_boundary=candidate.point_a_on_foreground_boundary,
+                    point_b_on_foreground_boundary=candidate.point_b_on_foreground_boundary,
+                    failure_reason=candidate.failure_reason,
                     distance_px=candidate.distance_px,
                     score=candidate.score,
                     on_stable_platform=candidate.on_stable_platform,
@@ -263,6 +281,7 @@ class SetupService:
             acquisition_frame_size=AcquisitionFrameSize(width=frame.width, height=frame.height),
             created_at_ms=time.time_ns() // 1_000_000,
             auto_tuned=request.auto_tuned,
+            auto_tune_score=request.auto_tune_score,
         )
         self._measurement_definitions[measurement_definition.measurement_definition_id] = (
             measurement_definition
@@ -401,14 +420,23 @@ def _build_debug_artifact(
         else:
             foreground = layers.morphology_foreground
         components = connected_components(foreground, segmentation.min_component_area_px)
-        if (
-            (
-                target_family is TargetFamily.BALLOON_ENVELOPE
-                and isinstance(detector_params, BalloonEnvelopeDetectorParams)
-                and detector_params.envelope_mode == "open_mesh"
-            )
-            or target_family is TargetFamily.WIRE_STRIP
-        ) and components:
+        if target_family is TargetFamily.WIRE_STRIP and isinstance(
+            detector_params, WireStripDetectorParams
+        ):
+            selected_component_mask = analyze_wire_components(
+                image=frame_image,
+                roi=roi,
+                roi_mask=roi_mask,
+                foreground=foreground,
+                components=components,
+                params=detector_params,
+            ).wire_foreground
+        elif (
+            target_family is TargetFamily.BALLOON_ENVELOPE
+            and isinstance(detector_params, BalloonEnvelopeDetectorParams)
+            and detector_params.envelope_mode == "open_mesh"
+            and components
+        ):
             selected_component_mask = np.zeros_like(foreground, dtype=bool)
             for component in components:
                 selected_component_mask |= component.mask

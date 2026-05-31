@@ -29,6 +29,14 @@ describe("setup recipe defaults", () => {
     expect(recipe.detector.measurement_mode).toBe("wire_bundle_envelope");
     expect(recipe.detector.require_physical_endpoints).toBe(false);
     expect(recipe.detector.skeleton_endpoint_detection).toBe(false);
+    expect(recipe.detector.min_interval_width_px).toBe(3);
+    expect(recipe.detector.min_valid_interval_count).toBe(2);
+    expect(recipe.detector.min_local_contrast_score).toBe(8);
+    expect(recipe.detector.max_bundle_internal_gap_px).toBe(60);
+    expect(recipe.detector.max_bundle_internal_gap_ratio).toBe(1);
+    expect(recipe.detector.enable_remote_interval_rejection).toBe(true);
+    expect(recipe.detector.enable_local_contrast_filter).toBe(true);
+    expect(recipe.detector.enable_orientation_scoring).toBe(true);
     expect(recipe.segmentation.threshold_mode).toBe("fixed");
     expect(recipe.segmentation.threshold_value).toBe(100);
   });

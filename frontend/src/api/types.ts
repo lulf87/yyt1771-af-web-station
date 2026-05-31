@@ -144,6 +144,26 @@ export interface WireStripDetectorParams {
   require_physical_endpoints: false;
   skeleton_endpoint_detection: false;
   preserve_visible_strip_contour: boolean;
+  min_interval_width_px: number;
+  max_interval_width_ratio: number;
+  min_valid_interval_count: number;
+  min_local_contrast_score: number;
+  min_wire_likeness_score: number;
+  max_broad_blob_area_ratio: number;
+  max_component_area_ratio: number;
+  min_component_area_px?: number | null;
+  max_internal_gap_px?: number | null;
+  max_internal_gap_ratio: number;
+  max_bundle_internal_gap_px?: number | null;
+  max_bundle_internal_gap_ratio: number;
+  min_neighbor_line_support: number;
+  component_aspect_ratio_min: number;
+  broad_blob_max_aspect_ratio: number;
+  enable_broad_blob_rejection: boolean;
+  enable_local_contrast_filter: boolean;
+  enable_neighbor_line_support_filter: boolean;
+  enable_remote_interval_rejection: boolean;
+  enable_orientation_scoring: boolean;
 }
 
 export type DetectorParams = BalloonEnvelopeDetectorParams | WireStripDetectorParams;
@@ -178,6 +198,7 @@ export interface MeasurementDefinition {
   coordinate_space: CoordinateSpace;
   created_at_ms: number;
   auto_tuned?: boolean;
+  auto_tune_score?: number | null;
 }
 
 export interface SetupConfirmRequest {
@@ -188,6 +209,7 @@ export interface SetupConfirmRequest {
   segmentation?: SegmentationParams | null;
   detector?: DetectorParams | null;
   auto_tuned?: boolean;
+  auto_tune_score?: number | null;
 }
 
 export interface SetupConfirmResponse {
@@ -213,8 +235,16 @@ export interface WireAutoTuneCandidate {
   formal_ab_span_px: number | null;
   valid_interval_count: number | null;
   rejected_interval_count: number;
+  selected_valid_intervals: Array<Record<string, unknown>>;
   broad_blob_rejection_count: number | null;
+  broad_blob_area_ratio: number | null;
+  local_contrast_score: number | null;
   wire_likeness_score: number | null;
+  neighbor_line_support: number | null;
+  roi_margin_px: number | null;
+  point_a_on_foreground_boundary: boolean | null;
+  point_b_on_foreground_boundary: boolean | null;
+  failure_reason: string | null;
   distance_px: number | null;
   score: number;
   on_stable_platform: boolean;
@@ -422,6 +452,11 @@ export interface OfflineRunTraceEntry {
   measurement_line_y: number | null;
   formal_ab_span_px: number | null;
   selected_valid_intervals?: Array<Record<string, number | null>> | null;
+  rejected_remote_intervals?: Array<Record<string, number | null>> | null;
+  selected_bundle_cluster_id?: number | null;
+  selected_bundle_outer_span_px?: number | null;
+  max_bundle_internal_gap_px?: number | null;
+  remote_interval_rejection_count?: number | null;
   point_a?: Point2D | null;
   point_b?: Point2D | null;
   point_a_on_foreground_boundary?: boolean | null;
