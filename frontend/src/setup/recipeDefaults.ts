@@ -103,7 +103,7 @@ export function recipeDefaultsForTarget(targetFamily: TargetFamily): SetupRecipe
       min_wire_likeness_score: 0,
       max_broad_blob_area_ratio: 0.22,
       max_component_area_ratio: 0.45,
-      min_component_area_px: null,
+      min_component_area_px: 40,
       max_internal_gap_px: null,
       max_internal_gap_ratio: 0.9,
       max_bundle_internal_gap_px: 60,

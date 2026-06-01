@@ -31,6 +31,7 @@ describe("setup recipe defaults", () => {
     expect(recipe.detector.skeleton_endpoint_detection).toBe(false);
     expect(recipe.detector.min_interval_width_px).toBe(3);
     expect(recipe.detector.min_valid_interval_count).toBe(2);
+    expect(recipe.detector.min_component_area_px).toBe(40);
     expect(recipe.detector.min_local_contrast_score).toBe(8);
     expect(recipe.detector.max_bundle_internal_gap_px).toBe(60);
     expect(recipe.detector.max_bundle_internal_gap_ratio).toBe(1);

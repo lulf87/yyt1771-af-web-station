@@ -768,11 +768,6 @@ function LiveTimingReadout({
           </div>
         ))}
       </dl>
-      {detectorLimited ? (
-        <p className="panel-warning">
-          Detector is slower than target FPS; playback is detector-limited.
-        </p>
-      ) : null}
       {previewLimited ? (
         <p className="panel-warning">
           Preview encoding is using a large share of the frame budget; playback is preview-limited.

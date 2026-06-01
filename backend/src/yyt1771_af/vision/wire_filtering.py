@@ -30,6 +30,8 @@ BROAD_BLOB_AREA_RATIO = 0.22
 BROAD_BLOB_MAX_ASPECT_RATIO = 1.8
 MIN_LOCAL_CONTRAST = 6.0
 LOCAL_CONTRAST_BAND_PX = 4
+DEFAULT_MIN_COMPONENT_AREA_PX = 40
+SMALL_COMPONENT_ASPECT_AREA_PX = 120
 
 # wire_likeness_score normalisation targets.
 _TARGET_ASPECT_RATIO = 4.0
@@ -266,7 +268,7 @@ def _classify(
     wire_likeness_score: float,
     params: WireStripDetectorParams,
 ) -> tuple[bool, str | None]:
-    min_component_area = params.min_component_area_px
+    min_component_area = params.min_component_area_px or DEFAULT_MIN_COMPONENT_AREA_PX
     if min_component_area is not None and area_px < min_component_area:
         return False, "component_too_small"
     if (
@@ -277,6 +279,11 @@ def _classify(
         return False, "broad_blob"
     if params.enable_broad_blob_rejection and area_ratio > params.max_component_area_ratio:
         return False, "component_too_large"
+    if (
+        area_px <= SMALL_COMPONENT_ASPECT_AREA_PX
+        and aspect_ratio < params.component_aspect_ratio_min
+    ):
+        return False, "aspect_ratio_below_min"
     if params.enable_local_contrast_filter and local_contrast < params.min_local_contrast_score:
         return False, "low_contrast"
     if wire_likeness_score < params.min_wire_likeness_score:

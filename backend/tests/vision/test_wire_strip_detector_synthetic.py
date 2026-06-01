@@ -112,6 +112,44 @@ def _wire_bundle_with_high_contrast_remote_dot() -> tuple[np.ndarray, RotatedRoi
     return image, roi
 
 
+def _wire_bundle_with_nearby_high_contrast_speck() -> tuple[np.ndarray, RotatedRoi]:
+    roi = RotatedRoi(center_x=160.0, center_y=110.0, width=280.0, height=140.0, angle_deg=0.0)
+    y, x = np.indices((220, 360))
+    dx = x.astype(float) - roi.center_x
+    dy = y.astype(float) - roi.center_y
+    wires = (
+        ((dx >= -55.0) & (dx <= -50.0))
+        | ((dx >= -14.0) & (dx <= -7.0))
+        | ((dx >= 1.0) & (dx <= 17.0))
+        | ((dx >= 37.0) & (dx <= 46.0))
+        | ((dx >= 52.0) & (dx <= 79.0))
+    ) & (np.abs(dy) <= 42.0)
+    # This speck is close enough to the real bundle that the 60px bundle-gap
+    # threshold alone would merge it into the selected cluster.
+    speck = (dx >= 128.0) & (dx <= 132.0) & (dy >= -2.0) & (dy <= 2.0)
+    image = np.full((220, 360), 230, dtype=np.uint8)
+    image[wires | speck] = 30
+    return image, roi
+
+
+def _wire_bundle_with_nearby_round_blob() -> tuple[np.ndarray, RotatedRoi]:
+    roi = RotatedRoi(center_x=160.0, center_y=110.0, width=280.0, height=140.0, angle_deg=0.0)
+    y, x = np.indices((220, 360))
+    dx = x.astype(float) - roi.center_x
+    dy = y.astype(float) - roi.center_y
+    wires = (
+        ((dx >= -55.0) & (dx <= -50.0))
+        | ((dx >= -14.0) & (dx <= -7.0))
+        | ((dx >= 1.0) & (dx <= 17.0))
+        | ((dx >= 37.0) & (dx <= 46.0))
+        | ((dx >= 52.0) & (dx <= 79.0))
+    ) & (np.abs(dy) <= 42.0)
+    round_blob = (dx >= 126.0) & (dx <= 134.0) & (dy >= -4.0) & (dy <= 4.0)
+    image = np.full((220, 360), 230, dtype=np.uint8)
+    image[wires | round_blob] = 30
+    return image, roi
+
+
 def _rotated_strip_mask(
     *,
     width: int = 240,
@@ -536,6 +574,60 @@ def test_wire_bundle_envelope_rejects_high_contrast_remote_interval_as_b() -> No
     assert result.diagnostics.remote_interval_rejection_count == 1
     assert result.diagnostics.rejected_remote_interval_reasons is not None
     assert "remote_gap_exceeded" in result.diagnostics.rejected_remote_interval_reasons
+
+
+def test_wire_bundle_envelope_rejects_nearby_high_contrast_speck_as_b() -> None:
+    detector = WireStripDetector()
+    frame, roi = _wire_bundle_with_nearby_high_contrast_speck()
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.valid is True
+    assert result.point_b is not None
+    b_local = _local_coordinates(result.point_b.x, result.point_b.y, roi)
+    assert b_local[0] == pytest.approx(79.0, abs=2.0)
+    assert result.diagnostics.rightmost_valid_interval is not None
+    assert result.diagnostics.rightmost_valid_interval.end_local_x == pytest.approx(79.0, abs=2.0)
+    assert result.diagnostics.rejected_interval_reasons is not None
+    assert "component_too_small" in result.diagnostics.rejected_interval_reasons
+
+
+def test_wire_bundle_envelope_rejects_nearby_round_blob_as_b() -> None:
+    detector = WireStripDetector()
+    frame, roi = _wire_bundle_with_nearby_round_blob()
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.valid is True
+    assert result.point_b is not None
+    b_local = _local_coordinates(result.point_b.x, result.point_b.y, roi)
+    assert b_local[0] == pytest.approx(79.0, abs=2.0)
+    assert result.diagnostics.rejected_interval_reasons is not None
+    assert "aspect_ratio_below_min" in result.diagnostics.rejected_interval_reasons
 
 
 def test_wire_invariant_failure_preserves_source_diagnostics(
