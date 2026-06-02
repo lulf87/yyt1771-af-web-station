@@ -150,6 +150,53 @@ def _wire_bundle_with_nearby_round_blob() -> tuple[np.ndarray, RotatedRoi]:
     return image, roi
 
 
+def _two_candidate_wire_bundle_frame(
+    *,
+    stronger_support: bool,
+) -> tuple[np.ndarray, RotatedRoi]:
+    roi = RotatedRoi(center_x=160.0, center_y=110.0, width=260.0, height=140.0, angle_deg=0.0)
+    y, x = np.indices((220, 360))
+    dx = x.astype(float) - roi.center_x
+    dy = y.astype(float) - roi.center_y
+    low_support = (
+        ((dx >= -50.0) & (dx <= -46.0))
+        | ((dx >= -3.0) & (dx <= 1.0))
+        | ((dx >= 46.0) & (dx <= 50.0))
+    ) & (np.abs(dy + 35.0) <= 34.0)
+    high_support_intervals = (
+        ((dx >= -49.0) & (dx <= -39.0))
+        | ((dx >= -8.0) & (dx <= 4.0))
+        | ((dx >= 39.0) & (dx <= 50.0))
+    )
+    high_support = high_support_intervals & (np.abs(dy - 35.0) <= 34.0)
+    image = np.full((220, 360), 230, dtype=np.uint8)
+    image[low_support | high_support] = 30
+    if not stronger_support:
+        ambiguous_copy = (
+            ((dx >= -50.0) & (dx <= -46.0))
+            | ((dx >= -3.0) & (dx <= 1.0))
+            | ((dx >= 46.0) & (dx <= 50.0))
+        ) & (np.abs(dy - 35.0) <= 34.0)
+        image[high_support] = 230
+        image[ambiguous_copy] = 30
+    return image, roi
+
+
+def _low_support_wide_bundle_frame() -> tuple[np.ndarray, RotatedRoi]:
+    roi = RotatedRoi(center_x=160.0, center_y=110.0, width=220.0, height=140.0, angle_deg=0.0)
+    y, x = np.indices((220, 360))
+    dx = x.astype(float) - roi.center_x
+    dy = y.astype(float) - roi.center_y
+    wires = (
+        ((dx >= -80.0) & (dx <= -75.0))
+        | ((dx >= -2.5) & (dx <= 2.5))
+        | ((dx >= 75.0) & (dx <= 80.0))
+    ) & (np.abs(dy) <= 60.0)
+    image = np.full((220, 360), 230, dtype=np.uint8)
+    image[wires] = 30
+    return image, roi
+
+
 def _rotated_strip_mask(
     *,
     width: int = 240,
@@ -502,6 +549,17 @@ def test_wire_bundle_envelope_selects_current_frame_largest_span_without_previou
     assert result.point_b is not None
     assert result.diagnostics.formal_ab_span_px is not None
     assert result.diagnostics.formal_ab_span_px >= 115.0
+    assert result.diagnostics.selected_line_rank == 1
+    assert result.diagnostics.candidate_count is not None
+    assert result.diagnostics.candidate_count >= 2
+    assert result.diagnostics.top_candidate_lines is not None
+    assert len(result.diagnostics.top_candidate_lines) >= 2
+    assert result.diagnostics.selected_line_span_px == result.diagnostics.formal_ab_span_px
+    assert result.diagnostics.second_best_span_px is not None
+    assert result.diagnostics.span_margin_to_second_best_px is not None
+    assert result.diagnostics.top_candidate_lines[0].formal_ab_span_px >= (
+        result.diagnostics.top_candidate_lines[1].formal_ab_span_px
+    )
 
 
 def test_wire_bundle_envelope_rejects_low_contrast_remote_patch_as_b() -> None:
@@ -574,6 +632,105 @@ def test_wire_bundle_envelope_rejects_high_contrast_remote_interval_as_b() -> No
     assert result.diagnostics.remote_interval_rejection_count == 1
     assert result.diagnostics.rejected_remote_interval_reasons is not None
     assert "remote_gap_exceeded" in result.diagnostics.rejected_remote_interval_reasons
+    assert result.diagnostics.top_candidate_lines is not None
+    assert result.diagnostics.top_candidate_lines[0].selected_cluster_id == 0
+    assert result.diagnostics.selected_line_support_ratio is not None
+    assert result.diagnostics.selected_line_max_internal_gap_px is not None
+    assert result.diagnostics.selected_line_interval_count is not None
+    assert result.diagnostics.selected_line_interval_count >= 2
+
+
+def test_wire_candidate_quality_gate_rejects_low_support_wide_cluster() -> None:
+    detector = WireStripDetector()
+    frame, roi = _low_support_wide_bundle_frame()
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(
+            max_bundle_internal_gap_px=100.0,
+            min_support_ratio=0.12,
+        ),
+    )
+
+    assert result.valid is False
+    assert result.status is DetectionStatus.QUALITY_BELOW_THRESHOLD
+    assert result.point_a is None
+    assert result.point_b is None
+    assert result.distance_px is None
+    assert result.diagnostics.top_candidate_lines is not None
+    assert result.diagnostics.top_candidate_lines[0].rejected_reason == "support_ratio_below_min"
+
+
+def test_wire_near_equal_spans_tie_break_by_support_ratio() -> None:
+    detector = WireStripDetector()
+    frame, roi = _two_candidate_wire_bundle_frame(stronger_support=True)
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.valid is True
+    assert result.diagnostics.selected_line_reason == "span_tie_break_support_ratio"
+    assert result.diagnostics.span_margin_to_second_best_px is not None
+    assert result.diagnostics.span_margin_to_second_best_px <= 2.0
+    assert result.diagnostics.selected_line_support_ratio is not None
+    assert result.diagnostics.top_candidate_lines is not None
+    selected = [
+        candidate for candidate in result.diagnostics.top_candidate_lines if candidate.selected
+    ]
+    assert len(selected) == 1
+    assert selected[0].support_ratio == result.diagnostics.selected_line_support_ratio
+    assert result.diagnostics.measurement_line_y is not None
+    assert result.diagnostics.measurement_line_y > 0.0
+
+
+def test_wire_near_equal_low_quality_candidates_return_ambiguous() -> None:
+    detector = WireStripDetector()
+    frame, roi = _two_candidate_wire_bundle_frame(stronger_support=False)
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.valid is False
+    assert result.status is DetectionStatus.CALIPER_CONTACT_AMBIGUOUS
+    assert result.point_a is None
+    assert result.point_b is None
+    assert result.distance_px is None
+    assert result.diagnostics.ambiguous_candidate_count is not None
+    assert result.diagnostics.ambiguous_candidate_count >= 2
+    assert result.diagnostics.top_candidate_lines is not None
+    assert result.diagnostics.message is not None
+    assert "ambiguous" in result.diagnostics.message
 
 
 def test_wire_bundle_envelope_rejects_nearby_high_contrast_speck_as_b() -> None:

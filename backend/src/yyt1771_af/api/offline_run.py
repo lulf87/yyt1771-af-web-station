@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 
+from yyt1771_af.core.models import PointProbeResponse
 from yyt1771_af.services.offline_datasets import (
     OfflineDatasetInfo,
     list_offline_dataset_infos,
@@ -13,6 +14,7 @@ from yyt1771_af.services.offline_run_service import (
     OfflineRunFrameResponse,
     OfflineRunOpenRequest,
     OfflineRunOpenResponse,
+    OfflineRunPointProbeRequest,
     OfflineRunRequestError,
     OfflineRunSeekRequest,
     OfflineRunStatusResponse,
@@ -143,6 +145,42 @@ def get_offline_run_frame_preview(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=_safe_error_detail(exc)) from exc
     return Response(content=png, media_type="image/png")
+
+
+@router.get("/{session_id}/frame/{frame_index}/roi-crop.png")
+def get_offline_run_roi_crop(
+    session_id: str,
+    frame_index: int,
+    scale: int = Query(default=1, ge=1, le=4),
+) -> Response:
+    try:
+        png = offline_run_service.roi_crop_png(session_id, frame_index, scale=scale)
+    except OfflineRunRequestError as exc:
+        return _offline_run_error_response(exc)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=_safe_error_detail(exc)) from exc
+    except IndexError as exc:
+        raise HTTPException(status_code=404, detail=_safe_error_detail(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=_safe_error_detail(exc)) from exc
+    return Response(content=png, media_type="image/png")
+
+
+@router.post("/{session_id}/probe-point", response_model=PointProbeResponse)
+def probe_offline_run_point(
+    session_id: str,
+    request: OfflineRunPointProbeRequest,
+) -> PointProbeResponse:
+    try:
+        return offline_run_service.probe_point(session_id, request)
+    except OfflineRunRequestError as exc:
+        return _offline_run_error_response(exc)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=_safe_error_detail(exc)) from exc
+    except IndexError as exc:
+        raise HTTPException(status_code=404, detail=_safe_error_detail(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=_safe_error_detail(exc)) from exc
 
 
 @router.get("/{session_id}/trace", response_model=OfflineRunTraceResponse)

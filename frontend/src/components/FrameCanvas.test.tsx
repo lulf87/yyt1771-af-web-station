@@ -191,6 +191,40 @@ describe("FrameCanvas", () => {
     expect(markup).not.toContain("REJECTED DEBUG");
   });
 
+  it("does not synthesize formal A/B from interval diagnostics", () => {
+    const wireDetection: SetupDetectResponse = {
+      status: "ok",
+      valid: true,
+      point_a: null,
+      point_b: null,
+      distance_px: null,
+      quality: 0.5,
+      target_family: "wire_strip",
+      detector: "wire_strip_detector:v1",
+      diagnostics: {
+        selected_valid_intervals: [
+          { start_local_x: -40, end_local_x: -34, width_px: 6, line_y: 0 },
+          { start_local_x: 34, end_local_x: 40, width_px: 6, line_y: 0 },
+        ],
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={wireDetection}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+        showDiagnosticsOverlay
+      />,
+    );
+
+    expect(markup).toContain("selected-interval-segment");
+    expect(markup).not.toContain("measurement-line");
+    expect(markup).not.toContain("point point-a");
+    expect(markup).not.toContain("point point-b");
+  });
+
   it("renders rejected remote wire intervals as rejected diagnostics", () => {
     const wireDetection: SetupDetectResponse = {
       status: "ok",
@@ -221,6 +255,75 @@ describe("FrameCanvas", () => {
     expect(markup).toContain("rejected-interval-segment");
     expect(markup).toContain("measurement-line");
     expect(markup).not.toContain("REJECTED DEBUG");
+  });
+
+  it("renders top candidate lines only as diagnostics", () => {
+    const wireDetection: SetupDetectResponse = {
+      status: "ok",
+      valid: true,
+      point_a: { x: 70, y: 110, coordinate_space: "acquisition" },
+      point_b: { x: 150, y: 110, coordinate_space: "acquisition" },
+      distance_px: 80,
+      quality: 0.9,
+      target_family: "wire_strip",
+      detector: "wire_strip_detector:v1",
+      diagnostics: {
+        measurement_line_y: 0,
+        top_candidate_lines: [
+          { measurement_line_y: 0, formal_ab_span_px: 80, selected: true },
+          { measurement_line_y: 10, formal_ab_span_px: 79, selected: false },
+        ],
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={wireDetection}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+        showDiagnosticsOverlay
+      />,
+    );
+
+    expect(markup).toContain("candidate-line selected-candidate-line");
+    expect(markup).toContain("candidate-line secondary-candidate-line");
+    expect(markup).toContain("measurement-line");
+  });
+
+  it("does not draw formal A/B for ambiguous invalid detections", () => {
+    const ambiguousDetection: SetupDetectResponse = {
+      status: "caliper_contact_ambiguous",
+      valid: false,
+      point_a: null,
+      point_b: null,
+      distance_px: null,
+      quality: 0.4,
+      target_family: "wire_strip",
+      detector: "wire_strip_detector:v1",
+      diagnostics: {
+        top_candidate_lines: [
+          { measurement_line_y: -8, formal_ab_span_px: 80, selected: false },
+          { measurement_line_y: 8, formal_ab_span_px: 80, selected: false },
+        ],
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={ambiguousDetection}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+        showDiagnosticsOverlay
+      />,
+    );
+
+    expect(markup).toContain("caliper_contact_ambiguous");
+    expect(markup).toContain("candidate-line secondary-candidate-line");
+    expect(markup).not.toContain("measurement-line");
+    expect(markup).not.toContain("point point-a");
+    expect(markup).not.toContain("point point-b");
   });
 
   it("keeps interval diagnostics hidden during playback when diagnostics overlay is disabled", () => {
@@ -290,5 +393,56 @@ describe("FrameCanvas", () => {
     expect(markup).toContain("source-interval-segment");
     expect(markup).toContain("measurement-line");
     expect(markup).not.toContain("REJECTED DEBUG");
+  });
+
+  it("renders a rotation handle for editable ROI", () => {
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={null}
+        frameRef={frameRef}
+        interactive
+        onRoiChange={() => undefined}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+      />,
+    );
+
+    expect(markup).toContain("roi-rotate-handle");
+    expect(markup).toContain("roi-rotate-arm");
+  });
+
+  it("raw-only mode hides formal and diagnostic overlays while keeping the raw image", () => {
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={detection}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        rawOnly
+        roi={roi}
+        showDiagnosticsOverlay
+      />,
+    );
+
+    expect(markup).toContain("frame-image");
+    expect(markup).toContain("raw-only");
+    expect(markup).not.toContain("roi-overlay");
+    expect(markup).not.toContain("measurement-line");
+    expect(markup).not.toContain("point point-a");
+  });
+
+  it("probe mode exposes an acquisition click layer without computing A/B", () => {
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={detection}
+        frameRef={frameRef}
+        onProbePoint={() => undefined}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        probeMode
+        roi={roi}
+      />,
+    );
+
+    expect(markup).toContain("probe-point-layer");
+    expect(markup).toContain("aria-label=\"Probe point layer\"");
   });
 });

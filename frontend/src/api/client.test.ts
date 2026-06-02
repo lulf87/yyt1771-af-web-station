@@ -12,6 +12,8 @@ import {
   nextOfflineRun,
   openCamera,
   openOfflineRun,
+  probeOfflineRunPoint,
+  probeSetupPoint,
   seekOfflineRun,
   setTemperatureOutput,
   setTemperaturePower,
@@ -310,6 +312,118 @@ describe("setup API client", () => {
     const posted = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(posted.target_family).toBe("wire_strip");
     expect(posted.recipe_name).toBe("wire_strip_default");
+  });
+
+  it("posts setup point probes without calculating formal A/B", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        frame_identity: {
+          frame_id: 1,
+          frame_index: 0,
+          frame_name: "frame_000001.npy",
+          source_type: "offline",
+          acquisition_width: 320,
+          acquisition_height: 220,
+          recipe_summary: null,
+          debug_level: "full",
+        },
+        x: 265,
+        y: 110,
+        coordinate_space: "acquisition",
+        pixel_value: 30,
+        inside_roi: true,
+        raw_foreground: true,
+        morphology_foreground: true,
+        wire_foreground: true,
+        component_id: 3,
+        component_accepted: true,
+        component_reject_reason: null,
+        interval_id: "rejected_remote:0",
+        selected_valid_interval: false,
+        rejected_interval: false,
+        rejected_remote_interval: true,
+        reject_reason: "remote_gap_exceeded",
+        source_interval_id: null,
+        would_be_ab_source: false,
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await probeSetupPoint({
+      frame_ref: {
+        frame_id: 1,
+        timestamp_ms: 100,
+        width: 320,
+        height: 220,
+        coordinate_space: "acquisition",
+      },
+      roi: {
+        center_x: 160,
+        center_y: 110,
+        width: 280,
+        height: 150,
+        angle_deg: 0,
+        coordinate_space: "acquisition",
+      },
+      target_family: "wire_strip",
+      recipe_name: "wire_strip_default",
+      x: 265,
+      y: 110,
+      coordinate_space: "acquisition",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/setup/probe-point",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const posted = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(posted.x).toBe(265);
+    expect(posted.point_a).toBeUndefined();
+    expect(posted.point_b).toBeUndefined();
+  });
+
+  it("posts live offline point probes by session and frame index", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        frame_identity: {
+          frame_id: 1,
+          frame_index: 0,
+          frame_name: "frame_000001.npy",
+          source_type: "offline",
+          acquisition_width: 320,
+          acquisition_height: 220,
+          recipe_summary: null,
+          debug_level: "full",
+        },
+        x: 265,
+        y: 110,
+        coordinate_space: "acquisition",
+        pixel_value: 30,
+        inside_roi: true,
+        raw_foreground: true,
+        morphology_foreground: true,
+        wire_foreground: true,
+        selected_valid_interval: false,
+        rejected_interval: false,
+        rejected_remote_interval: true,
+        would_be_ab_source: false,
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await probeOfflineRunPoint("offline_run_1", {
+      frame_index: 0,
+      x: 265,
+      y: 110,
+      coordinate_space: "acquisition",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/offline-run/offline_run_1/probe-point",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("reports backend export failures without computing export data", async () => {

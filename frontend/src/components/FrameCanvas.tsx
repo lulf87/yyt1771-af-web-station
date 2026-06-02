@@ -6,12 +6,15 @@ import {
   clientPointToAcquisition,
   createRoiFromDrag,
   hitTestRoiHandle,
+  hitTestRoiRotationHandle,
   moveRoiByDelta,
   pointInsideRoi,
   pointToOverlayCircle,
   resizeRoiFromHandle,
+  roiRotationHandlePoint,
   roiHandlePoints,
   roiToOverlayRect,
+  rotateRoiFromPointer,
   type RoiHandle,
 } from "../geometry/transforms";
 
@@ -26,6 +29,9 @@ interface FrameCanvasProps {
   onPreviewLoad?: (previewUrl: string) => void;
   emptyLabel?: string;
   showDiagnosticsOverlay?: boolean;
+  rawOnly?: boolean;
+  probeMode?: boolean;
+  onProbePoint?: (point: Point2D) => void;
 }
 
 type DragState =
@@ -40,6 +46,9 @@ type DragState =
   | {
       mode: "resize";
       handle: RoiHandle;
+    }
+  | {
+      mode: "rotate";
     };
 
 export function FrameCanvas({
@@ -53,6 +62,9 @@ export function FrameCanvas({
   onPreviewLoad,
   emptyLabel = "No frozen frame",
   showDiagnosticsOverlay = false,
+  rawOnly = false,
+  probeMode = false,
+  onProbePoint,
 }: FrameCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -68,6 +80,7 @@ export function FrameCanvas({
   const activeFrameRef = frameRef;
   const roiRect = roiToOverlayRect(roi);
   const handles = roiHandlePoints(roi);
+  const rotationHandle = roiRotationHandlePoint(roi);
   const pointA =
     detection?.valid === true && detection.point_a ? pointToOverlayCircle(detection.point_a) : null;
   const pointB =
@@ -113,16 +126,25 @@ export function FrameCanvas({
     showDiagnosticsOverlay && typeof measurementLineY === "number"
       ? measurementLineSegment(roi, measurementLineY)
       : null;
+  const candidateLines =
+    showDiagnosticsOverlay && detection !== null
+      ? diagnosticCandidateLinesToSegments(detection.diagnostics.top_candidate_lines, roi)
+      : [];
 
   function pointerToAcquisition(event: PointerEvent<SVGSVGElement>): Point2D {
-    if (svgRef.current === null) {
-      return { x: 0, y: 0, coordinate_space: "acquisition" };
-    }
     return clientPointToAcquisition(
       event,
-      svgRef.current.getBoundingClientRect(),
+      event.currentTarget.getBoundingClientRect(),
       { width: activeFrameRef.width, height: activeFrameRef.height },
     );
+  }
+
+  function handleProbePointerDown(event: PointerEvent<SVGSVGElement>) {
+    if (!probeMode || onProbePoint === undefined) {
+      return;
+    }
+    event.stopPropagation();
+    onProbePoint(pointerToAcquisition(event));
   }
 
   function handlePointerDown(event: PointerEvent<SVGSVGElement>) {
@@ -133,9 +155,12 @@ export function FrameCanvas({
     const rect = event.currentTarget.getBoundingClientRect();
     const tolerancePx =
       Math.max(activeFrameRef.width / rect.width, activeFrameRef.height / rect.height) * 12;
+    const isRotationHandle = hitTestRoiRotationHandle(roi, point, tolerancePx);
     const handle = hitTestRoiHandle(roi, point, tolerancePx);
     event.currentTarget.setPointerCapture(event.pointerId);
-    if (handle !== null) {
+    if (isRotationHandle) {
+      setDragState({ mode: "rotate" });
+    } else if (handle !== null) {
       setDragState({ mode: "resize", handle });
     } else if (pointInsideRoi(roi, point)) {
       setDragState({ mode: "move", last: point });
@@ -162,8 +187,10 @@ export function FrameCanvas({
         ),
       );
       setDragState({ mode: "move", last: point });
-    } else {
+    } else if (dragState.mode === "resize") {
       onRoiChange(resizeRoiFromHandle(roi, dragState.handle, point, activeFrameRef));
+    } else {
+      onRoiChange(rotateRoiFromPointer(roi, point, activeFrameRef));
     }
   }
 
@@ -176,7 +203,13 @@ export function FrameCanvas({
 
   return (
     <div
-      className="frame-view"
+      className={[
+        "frame-view",
+        rawOnly ? "raw-only" : "",
+        probeMode ? "probe-mode" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       style={{ aspectRatio: `${activeFrameRef.width} / ${activeFrameRef.height}` }}
     >
       <img
@@ -186,17 +219,18 @@ export function FrameCanvas({
         onLoad={() => onPreviewLoad?.(previewUrl)}
         src={previewUrl}
       />
-      <svg
-        aria-label="Acquisition overlay"
-        className={canEdit ? "frame-overlay editable" : "frame-overlay"}
-        onPointerCancel={handlePointerUp}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        ref={svgRef}
-        role="img"
-        viewBox={`0 0 ${activeFrameRef.width} ${activeFrameRef.height}`}
-      >
+      {!rawOnly ? (
+        <svg
+          aria-label="Acquisition overlay"
+          className={canEdit ? "frame-overlay editable" : "frame-overlay"}
+          onPointerCancel={handlePointerUp}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          ref={svgRef}
+          role="img"
+          viewBox={`0 0 ${activeFrameRef.width} ${activeFrameRef.height}`}
+        >
         <rect
           className={isInvalidDetection ? "roi-overlay invalid" : "roi-overlay"}
           {...roiRect}
@@ -211,16 +245,35 @@ export function FrameCanvas({
           </g>
         ) : null}
         {canEdit
-          ? Object.entries(handles).map(([handle, point]) => (
-              <circle
-                className="roi-handle"
-                cx={point.x}
-                cy={point.y}
-                key={handle}
-                r="5"
+          ? [
+              <line
+                className="roi-rotate-arm"
+                key="rotate-arm"
                 vectorEffect="non-scaling-stroke"
-              />
-            ))
+                x1={handles.n.x}
+                x2={rotationHandle.x}
+                y1={handles.n.y}
+                y2={rotationHandle.y}
+              />,
+              <circle
+                className="roi-rotate-handle"
+                cx={rotationHandle.x}
+                cy={rotationHandle.y}
+                key="rotate-handle"
+                r="6"
+                vectorEffect="non-scaling-stroke"
+              />,
+              ...Object.entries(handles).map(([handle, point]) => (
+                <circle
+                  className="roi-handle"
+                  cx={point.x}
+                  cy={point.y}
+                  key={handle}
+                  r="5"
+                  vectorEffect="non-scaling-stroke"
+                />
+              )),
+            ]
           : null}
         {rejectedIntervalSegments.map((segment, index) => (
           <line
@@ -265,6 +318,21 @@ export function FrameCanvas({
             y2={debugMeasurementLine.y2}
           />
         ) : null}
+        {candidateLines.map((candidate, index) => (
+          <line
+            className={
+              candidate.selected
+                ? "candidate-line selected-candidate-line"
+                : "candidate-line secondary-candidate-line"
+            }
+            key={`candidate-${candidate.y1}-${index}`}
+            vectorEffect="non-scaling-stroke"
+            x1={candidate.x1}
+            x2={candidate.x2}
+            y1={candidate.y1}
+            y2={candidate.y2}
+          />
+        ))}
         {pointA && pointB ? (
           <line
             className="measurement-line"
@@ -302,7 +370,25 @@ export function FrameCanvas({
             REJECTED DEBUG
           </text>
         ) : null}
-      </svg>
+        </svg>
+      ) : null}
+      {probeMode ? (
+        <svg
+          aria-label="Probe point layer"
+          className="probe-point-layer"
+          onPointerDown={handleProbePointerDown}
+          role="img"
+          viewBox={`0 0 ${activeFrameRef.width} ${activeFrameRef.height}`}
+        >
+          <rect
+            className="probe-point-hit-area"
+            height={activeFrameRef.height}
+            width={activeFrameRef.width}
+            x="0"
+            y="0"
+          />
+        </svg>
+      ) : null}
     </div>
   );
 }
@@ -370,6 +456,30 @@ function measurementLineSegment(
   const start = localPointToAcquisition(roi, -roi.width / 2, lineY);
   const end = localPointToAcquisition(roi, roi.width / 2, lineY);
   return { x1: start.x, y1: start.y, x2: end.x, y2: end.y };
+}
+
+function diagnosticCandidateLinesToSegments(
+  value: unknown,
+  roi: RotatedRoi,
+): Array<{ x1: number; y1: number; x2: number; y2: number; selected: boolean }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.slice(0, 2).flatMap((item) => {
+    if (typeof item !== "object" || item === null || !("measurement_line_y" in item)) {
+      return [];
+    }
+    const candidate = item as Record<string, unknown>;
+    if (typeof candidate.measurement_line_y !== "number") {
+      return [];
+    }
+    return [
+      {
+        ...measurementLineSegment(roi, candidate.measurement_line_y),
+        selected: candidate.selected === true,
+      },
+    ];
+  });
 }
 
 function localPointToAcquisition(

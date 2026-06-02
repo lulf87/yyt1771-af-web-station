@@ -63,6 +63,17 @@ export interface FrameRef {
   coordinate_space: CoordinateSpace;
 }
 
+export interface FrameIdentity {
+  frame_id: number | null;
+  frame_index: number | null;
+  frame_name: string | null;
+  source_type: string;
+  acquisition_width: number;
+  acquisition_height: number;
+  recipe_summary: Record<string, unknown> | null;
+  debug_level: string | null;
+}
+
 export interface CameraOpenResponse {
   opened: boolean;
   source_type: string;
@@ -80,6 +91,7 @@ export interface CameraStatus {
 export interface FreezeResponse {
   frame_ref: FrameRef;
   preview_url: string;
+  frame_identity?: FrameIdentity | null;
 }
 
 export interface SetupDetectRequest {
@@ -103,6 +115,43 @@ export interface SetupDetectResponse {
   frame_ref?: FrameRef | null;
   diagnostics: Record<string, unknown>;
   debug_overlay_url?: string | null;
+  roi_crop_url?: string | null;
+  frame_identity?: FrameIdentity | null;
+}
+
+export interface SetupPointProbeRequest extends SetupDetectRequest {
+  x: number;
+  y: number;
+  coordinate_space: "acquisition";
+}
+
+export interface OfflineRunPointProbeRequest {
+  frame_index: number;
+  x: number;
+  y: number;
+  coordinate_space: "acquisition";
+}
+
+export interface PointProbeResponse {
+  frame_identity: FrameIdentity;
+  x: number;
+  y: number;
+  coordinate_space: CoordinateSpace;
+  pixel_value: number | null;
+  inside_roi: boolean;
+  raw_foreground: boolean;
+  morphology_foreground: boolean;
+  wire_foreground: boolean;
+  component_id: number | null;
+  component_accepted: boolean | null;
+  component_reject_reason: string | null;
+  interval_id: string | null;
+  selected_valid_interval: boolean;
+  rejected_interval: boolean;
+  rejected_remote_interval: boolean;
+  reject_reason: string | null;
+  source_interval_id: string | null;
+  would_be_ab_source: boolean;
 }
 
 export interface SegmentationParams {
@@ -157,6 +206,8 @@ export interface WireStripDetectorParams {
   max_bundle_internal_gap_px?: number | null;
   max_bundle_internal_gap_ratio: number;
   min_neighbor_line_support: number;
+  min_support_ratio: number;
+  span_tie_tolerance_px: number;
   component_aspect_ratio_min: number;
   broad_blob_max_aspect_ratio: number;
   enable_broad_blob_rejection: boolean;
@@ -423,6 +474,7 @@ export interface OfflineRunFrame {
   scale_x: number;
   scale_y: number;
   coordinate_space: CoordinateSpace;
+  frame_identity?: FrameIdentity | null;
   preview_url: string;
   end_of_stream: boolean;
   detection: SetupDetectResponse;
@@ -450,7 +502,16 @@ export interface OfflineRunTraceEntry {
   valid: boolean;
   distance_px: number | null;
   measurement_line_y: number | null;
+  selected_line_y?: number | null;
   formal_ab_span_px: number | null;
+  selected_line_span_px?: number | null;
+  second_best_span_px?: number | null;
+  span_margin_to_second_best_px?: number | null;
+  selected_line_reason?: string | null;
+  top_candidate_lines?: Array<Record<string, unknown>> | null;
+  source_interval_ids?: string[] | null;
+  point_a_source_interval_id?: string | null;
+  point_b_source_interval_id?: string | null;
   point_a_source_interval?: Record<string, number | null> | null;
   point_b_source_interval?: Record<string, number | null> | null;
   selected_valid_intervals?: Array<Record<string, number | null>> | null;

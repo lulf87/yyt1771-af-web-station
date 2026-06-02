@@ -36,6 +36,41 @@ describe("StatusPanel debug diagnostics", () => {
         mesh_outer_span_px: 98,
         bundle_outer_span_px: 98,
         formal_ab_span_px: 98,
+        selected_line_rank: 1,
+        selected_line_span_px: 98,
+        second_best_span_px: 97,
+        span_margin_to_second_best_px: 1,
+        selected_line_support_ratio: 0.42,
+        selected_line_max_internal_gap_px: 22,
+        selected_line_interval_count: 3,
+        candidate_count: 3,
+        ambiguous_candidate_count: 2,
+        top_candidate_lines: [
+          {
+            measurement_line_y: 0,
+            formal_ab_span_px: 98,
+            interval_count: 3,
+            support_ratio: 0.42,
+            max_internal_gap_px: 22,
+            neighbor_line_support: 2,
+            wire_likeness_score: 0.81,
+            rejected_reason: null,
+            selected_cluster_id: 0,
+            selected: true,
+          },
+          {
+            measurement_line_y: 1,
+            formal_ab_span_px: 97,
+            interval_count: 3,
+            support_ratio: 0.38,
+            max_internal_gap_px: 24,
+            neighbor_line_support: 2,
+            wire_likeness_score: 0.81,
+            rejected_reason: null,
+            selected_cluster_id: 0,
+            selected: false,
+          },
+        ],
         virtual_envelope_span_px: 120,
         candidate_line_is_debug_only: false,
         selected_line_reason: "max_formal_ab_span",
@@ -46,6 +81,7 @@ describe("StatusPanel debug diagnostics", () => {
       <StatusPanel cameraStatus={null} detection={detection} error={null} />,
     );
 
+    expect(markup).toContain("<summary><h3>Debug Diagnostics</h3></summary>");
     expect(markup).toContain("A local x,y");
     expect(markup).toContain("-49, 0");
     expect(markup).toContain("B local x,y");
@@ -60,6 +96,10 @@ describe("StatusPanel debug diagnostics", () => {
     expect(markup).toContain("Max internal gap");
     expect(markup).toContain("Bundle outer span");
     expect(markup).toContain("Formal A/B span");
+    expect(markup).toContain("Selected line rank");
+    expect(markup).toContain("Span margin to second");
+    expect(markup).toContain("Top candidate lines");
+    expect(markup).toContain("y=0 span=98");
     expect(markup).toContain("Selected line reason");
     expect(markup).toContain("Virtual envelope span");
     expect(markup).toContain("Candidate line debug-only");
@@ -126,7 +166,7 @@ describe("StatusPanel debug diagnostics", () => {
 
     expect(markup).toContain("A x,y");
     expect(markup).toContain("N/A");
-    expect(markup).toContain("Debug Diagnostics");
+    expect(markup).toContain("<summary><h3>Debug Diagnostics</h3></summary>");
     expect(markup).toContain("auto_dark_selected");
     expect(markup).toContain("preferred_point_dark");
     expect(markup).toContain("196");

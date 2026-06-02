@@ -60,6 +60,8 @@ describe("RunPage live offline mode", () => {
     expect(markup).toContain("Batch Run");
     expect(markup).toContain("Live Offline Run");
     expect(markup).toContain("Open Live Source");
+    expect(markup).toContain("间距-时间实时曲线");
+    expect(markup).toContain("Temperature vs Distance");
     expect(markup).toContain("Play");
     expect(markup).toContain("Step Next");
     expect(markup).toContain("Inspect current frame");
@@ -68,7 +70,10 @@ describe("RunPage live offline mode", () => {
     expect(markup).not.toContain("two_strip_outer_to_outer");
     expect(markup).toContain("FPS");
     expect(markup).toContain("Close");
-    expect(markup).toContain("Diagnostics");
+    expect(markup).toContain("<summary><h2>Diagnostics</h2></summary>");
+    expect(markup).toContain("<summary><h2>Live Status</h2></summary>");
+    expect(markup).not.toContain("run-summary");
+    expect(markup).not.toContain("summary-tile");
     expect(markup).toContain("Last successful frame");
     expect(markup).toContain("Failed frame");
     expect(markup).toContain("Target fps");
@@ -80,5 +85,8 @@ describe("RunPage live offline mode", () => {
     expect(markup).toContain("Diagnostics ms");
     expect(markup).toContain("Detector total ms");
     expect(markup).toContain("Frame budget ms");
+    expect(markup).toContain("Raw only");
+    expect(markup).toContain("Probe point");
+    expect(markup).toContain("ROI crop zoom");
   });
 });

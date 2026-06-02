@@ -100,6 +100,53 @@ class ObjectInterval(BaseModel):
     touches_roi_boundary: bool | None = None
 
 
+class WireComponentDiagnostics(BaseModel):
+    component_id: int
+    area_px: int
+    area_ratio_in_roi: float
+    bbox: ComponentBBox
+    aspect_ratio: float
+    orientation_deg: float
+    orientation_deviation_deg: float
+    local_contrast: float
+    wire_likeness_score: float
+    accepted: bool
+    reject_reason: str | None = None
+
+
+class FrameIdentity(BaseModel):
+    frame_id: int | None = None
+    frame_index: int | None = None
+    frame_name: str | None = None
+    source_type: str
+    acquisition_width: int = Field(gt=0)
+    acquisition_height: int = Field(gt=0)
+    recipe_summary: dict[str, Any] | None = None
+    debug_level: str | None = None
+
+
+class PointProbeResponse(BaseModel):
+    frame_identity: FrameIdentity
+    x: float
+    y: float
+    coordinate_space: CoordinateSpace = CoordinateSpace.ACQUISITION
+    pixel_value: int | None = None
+    inside_roi: bool
+    raw_foreground: bool
+    morphology_foreground: bool
+    wire_foreground: bool
+    component_id: int | None = None
+    component_accepted: bool | None = None
+    component_reject_reason: str | None = None
+    interval_id: str | None = None
+    selected_valid_interval: bool
+    rejected_interval: bool
+    rejected_remote_interval: bool
+    reject_reason: str | None = None
+    source_interval_id: str | None = None
+    would_be_ab_source: bool
+
+
 class BundleClusterDiagnostics(BaseModel):
     cluster_id: int
     interval_count: int
@@ -111,6 +158,20 @@ class BundleClusterDiagnostics(BaseModel):
     max_internal_gap_px: float
     selected: bool = False
     reject_reason: str | None = None
+
+
+class CandidateLineDiagnostics(BaseModel):
+    rank: int | None = None
+    selected: bool = False
+    measurement_line_y: float
+    formal_ab_span_px: float | None = None
+    interval_count: int | None = None
+    support_ratio: float | None = None
+    max_internal_gap_px: float | None = None
+    neighbor_line_support: int | None = None
+    wire_likeness_score: float | None = None
+    rejected_reason: str | None = None
+    selected_cluster_id: int | None = None
 
 
 class BalloonEnvelopeDetectorParams(BaseModel):
@@ -170,6 +231,8 @@ class WireStripDetectorParams(BaseModel):
     max_bundle_internal_gap_px: float | None = Field(default=60.0, gt=0.0)
     max_bundle_internal_gap_ratio: float = Field(default=1.0, gt=0.0, le=1.0)
     min_neighbor_line_support: int = Field(default=1, ge=0)
+    min_support_ratio: float = Field(default=0.08, ge=0.0, le=1.0)
+    span_tie_tolerance_px: float = Field(default=2.0, ge=0.0)
     component_aspect_ratio_min: float = Field(default=1.8, ge=1.0)
     broad_blob_max_aspect_ratio: float = Field(default=1.8, ge=1.0)
     enable_broad_blob_rejection: bool = True
@@ -275,6 +338,9 @@ class DetectionDiagnostics(BaseModel):
     formal_point_b_source_interval: ObjectInterval | None = None
     broad_blob_rejection_count: int | None = None
     broad_blob_area_ratio: float | None = None
+    wire_components: list[WireComponentDiagnostics] | None = None
+    accepted_components: list[WireComponentDiagnostics] | None = None
+    rejected_components: list[WireComponentDiagnostics] | None = None
     local_contrast_score: float | None = None
     wire_likeness_score: float | None = None
     component_area_px: int | None = None
@@ -293,6 +359,16 @@ class DetectionDiagnostics(BaseModel):
     mesh_outer_span_px: float | None = None
     bundle_outer_span_px: float | None = None
     formal_ab_span_px: float | None = None
+    selected_line_rank: int | None = None
+    top_candidate_lines: list[CandidateLineDiagnostics] | None = None
+    candidate_count: int | None = None
+    ambiguous_candidate_count: int | None = None
+    selected_line_span_px: float | None = None
+    second_best_span_px: float | None = None
+    span_margin_to_second_best_px: float | None = None
+    selected_line_support_ratio: float | None = None
+    selected_line_max_internal_gap_px: float | None = None
+    selected_line_interval_count: int | None = None
     virtual_envelope_span_px: float | None = None
     candidate_line_is_debug_only: bool | None = None
     selected_line_reason: str | None = None

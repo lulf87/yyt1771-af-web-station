@@ -89,18 +89,32 @@ For each `next`, `previous`, or `seek` request:
 The frontend only maps acquisition coordinates into the SVG overlay. It does not compute formal A/B, formal distance, segmentation, intervals, or contact points.
 
 For `wire_strip` with `wire_bundle_envelope`, a valid basic response carries the
-formal source summary needed to explain A/B without full interval arrays:
+formal source summary needed to explain A/B stability:
 
 - `point_a_source_interval`
 - `point_b_source_interval`
+- `selected_line_rank`
+- `selected_line_reason`
+- `top_candidate_lines`
+- `candidate_count`
+- `ambiguous_candidate_count`
+- `selected_line_span_px`
+- `second_best_span_px`
+- `span_margin_to_second_best_px`
+- `selected_line_support_ratio`
+- `selected_line_max_internal_gap_px`
+- `selected_line_interval_count`
 - `selected_bundle_cluster_id`
+- `selected_valid_intervals`
 - `selected_bundle_support_ratio`
 - `selected_bundle_max_internal_gap_px`
+- `rejected_remote_intervals`
+- `rejected_remote_interval_reasons`
 - `remote_interval_rejection_count`
 
-Full debug responses additionally carry `selected_valid_intervals`,
-`leftmost_valid_interval`, `rightmost_valid_interval`,
-`rejected_remote_intervals`, and rejected interval reasons.
+Full debug responses additionally carry heavy raw/bridged interval arrays,
+`leftmost_valid_interval`, `rightmost_valid_interval`, `bundle_clusters`, and
+overlay-specific masks.
 
 The detector invariant is that A comes from the left boundary of the leftmost
 selected valid interval and B comes from the right boundary of the rightmost
@@ -140,12 +154,28 @@ POST /api/offline-run/{session_id}/seek
 POST /api/offline-run/{session_id}/close
 GET  /api/offline-run/{session_id}/trace
 GET  /api/offline-run/{session_id}/frame/{frame_index}/preview.png?max_width=1200
+GET  /api/offline-run/{session_id}/frame/{frame_index}/roi-crop.png?scale=2
+POST /api/offline-run/{session_id}/probe-point
 ```
 
 The `preview_url` always includes the session id so multiple sessions cannot cross-read different datasets.
 
 `inspect` re-runs the current frame with `debug_level = full` and does not
 advance `current_frame_index` or `next_frame_index`.
+
+Every frame response carries a sanitized `frame_identity` with frame index/name,
+source type, acquisition size, recipe summary, and debug level. It is safe to
+show in the UI and must not contain local absolute paths.
+
+`roi-crop.png` returns an in-memory full-resolution ROI crop with nearest-neighbor
+1x, 2x, or 4x scaling. Use it together with raw-only view or point probe when
+checking 1 to 3 px specks. The full-frame debug overlay remains an overview and
+may downsample very small specks away.
+
+Point probe accepts an acquisition-coordinate x/y and returns pixel value,
+foreground-layer membership, component membership, selected/rejected interval
+membership, reject reason, and whether the point would be a formal A/B source.
+It is diagnostic only and does not change formal A/B selection.
 
 ## Error Model
 
@@ -187,7 +217,11 @@ frames. `GET /api/offline-run/{session_id}/trace` returns sanitized entries with
 - detection status, validity, distance, point A/B
 - ROI-local `measurement_line_y`
 - `formal_ab_span_px`
+- selected candidate line y/span/reason
+- second-best candidate span and span margin
+- top candidate line diagnostics
 - formal `point_a_source_interval` and `point_b_source_interval`
+- diagnostic source interval ids such as `selected:0` or `rejected_remote:0`
 - selected wire interval and bundle-cluster summary
 - `selected_bundle_support_ratio`
 - `selected_bundle_max_internal_gap_px`

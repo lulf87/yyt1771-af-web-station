@@ -180,7 +180,8 @@ select {
 }
 
 .frame-image,
-.frame-overlay {
+.frame-overlay,
+.probe-point-layer {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -201,6 +202,20 @@ select {
   touch-action: none;
 }
 
+.probe-point-layer {
+  cursor: crosshair;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.probe-point-hit-area {
+  fill: rgba(15, 118, 110, 0.01);
+}
+
+.frame-view.raw-only {
+  border-color: #64748b;
+}
+
 .roi-overlay {
   fill: rgba(214, 117, 42, 0.08);
   stroke: #d6752a;
@@ -216,6 +231,18 @@ select {
   fill: #ffffff;
   stroke: #d6752a;
   stroke-width: 2;
+}
+
+.roi-rotate-arm {
+  stroke: #d6752a;
+  stroke-dasharray: 5 4;
+  stroke-width: 1.5;
+}
+
+.roi-rotate-handle {
+  fill: #ffffff;
+  stroke: #d6752a;
+  stroke-width: 2.5;
 }
 
 .detection-invalid-banner rect {
@@ -238,6 +265,22 @@ select {
   stroke-dasharray: 6 4;
   stroke-width: 1.5;
   opacity: 0.85;
+}
+
+.candidate-line {
+  fill: none;
+  stroke-dasharray: 8 5;
+  opacity: 0.78;
+}
+
+.selected-candidate-line {
+  stroke: #16a34a;
+  stroke-width: 2.4;
+}
+
+.secondary-candidate-line {
+  stroke: #7c3aed;
+  stroke-width: 1.6;
 }
 
 .selected-interval-segment {
@@ -286,6 +329,36 @@ select {
   background: rgba(34, 197, 94, 0.16);
 }
 
+.inspect-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: end;
+}
+
+.inspect-controls .stacked-field {
+  grid-column: 1 / -1;
+}
+
+.roi-crop-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.roi-crop-panel h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.roi-crop-panel img {
+  display: block;
+  max-width: 100%;
+  border: 1px solid #cbd5df;
+  border-radius: 6px;
+  image-rendering: pixelated;
+}
+
 .point {
   stroke: #ffffff;
   stroke-width: 1.5;
@@ -327,6 +400,24 @@ select {
 .panel-section h2 {
   margin: 0 0 10px;
   font-size: 15px;
+}
+
+.collapsible-section summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.collapsible-section summary h2,
+.collapsible-section summary h3 {
+  display: inline;
+  margin: 0;
+}
+
+.collapsible-section[open] summary {
+  margin-bottom: 10px;
 }
 
 .panel-note {
@@ -443,11 +534,14 @@ select {
 }
 
 .debug-diagnostics {
-  display: grid;
-  gap: 10px;
   margin-top: 14px;
   border-top: 1px solid #e3e8ee;
   padding-top: 12px;
+}
+
+.debug-diagnostics[open] {
+  display: grid;
+  gap: 10px;
 }
 
 .debug-diagnostics h3,
@@ -569,6 +663,174 @@ select {
 .compact-frame .frame-empty,
 .compact-frame .frame-view {
   min-height: 380px;
+}
+
+.temperature-distance-panel {
+  display: grid;
+  gap: 12px;
+  min-height: 300px;
+  border: 1px solid #cbd5df;
+  border-radius: 8px;
+  padding: 16px;
+  background: #ffffff;
+}
+
+.chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chart-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chart-mode-toggle {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid #cbd5df;
+  border-radius: 6px;
+}
+
+.chart-mode-toggle button {
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
+  color: #405366;
+}
+
+.chart-mode-toggle button + button {
+  border-left: 1px solid #cbd5df;
+}
+
+.chart-mode-toggle button.active {
+  background: #e6f4f1;
+  color: #0f766e;
+}
+
+.chart-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.chart-header p,
+.chart-footer {
+  margin: 3px 0 0;
+  color: #617182;
+  font-size: 13px;
+}
+
+.temperature-distance-chart {
+  width: 100%;
+  height: 300px;
+}
+
+.chart-plot-bg {
+  fill: #f8fafc;
+  stroke: #e3e8ee;
+}
+
+.chart-axis {
+  stroke: #617182;
+  stroke-width: 1.4;
+}
+
+.chart-axis-label {
+  fill: #617182;
+  font-size: 13px;
+  text-anchor: middle;
+}
+
+.chart-axis-label-y {
+  dominant-baseline: middle;
+}
+
+.chart-tick line {
+  stroke: #d8e0e8;
+  stroke-width: 1;
+}
+
+.chart-tick text {
+  fill: #617182;
+  font-size: 12px;
+  text-anchor: middle;
+}
+
+.chart-tick text[x="36"] {
+  text-anchor: end;
+}
+
+.chart-distance-line,
+.chart-trend-line {
+  fill: none;
+  stroke: #0f766e;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.chart-trend-line {
+  stroke: #2563eb;
+}
+
+.chart-sample-point,
+.chart-scatter-point {
+  fill: #0f766e;
+  stroke: #ffffff;
+  stroke-width: 1.4;
+}
+
+.chart-sample-point.low-quality,
+.chart-scatter-point.low-quality {
+  fill: #b45309;
+  opacity: 0.58;
+}
+
+.chart-trend-point {
+  fill: #2563eb;
+  stroke: #ffffff;
+  stroke-width: 1.4;
+}
+
+.chart-trend-point.low-confidence {
+  fill: #93c5fd;
+  stroke: #2563eb;
+}
+
+.chart-current-point {
+  fill: none;
+  stroke: #2563eb;
+  stroke-width: 3;
+}
+
+.chart-invalid-point {
+  fill: #ffffff;
+  stroke: #8c99a6;
+  stroke-dasharray: 3 2;
+  stroke-width: 2;
+}
+
+.chart-jump-marker {
+  fill: #b42318;
+  stroke: #ffffff;
+  stroke-width: 1;
+}
+
+.chart-explanation {
+  margin: -2px 0 0;
+  color: #617182;
+  font-size: 13px;
+}
+
+.chart-footer {
+  display: flex;
+  gap: 14px;
+  margin: 0;
 }
 
 .summary-tile {

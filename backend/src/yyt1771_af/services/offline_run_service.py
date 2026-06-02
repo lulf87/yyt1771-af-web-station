@@ -16,12 +16,18 @@ from yyt1771_af.core.models import (
     DetectionDiagnostics,
     DetectionResult,
     Frame,
+    FrameIdentity,
     FrameRef,
     MeasurementDefinition,
+    Point2D,
+    PointProbeResponse,
+    WireStripDetectorParams,
 )
 from yyt1771_af.core.path_redaction import safe_path_label, sanitize_path_metadata
-from yyt1771_af.core.statuses import CoordinateSpace, DetectionStatus
+from yyt1771_af.core.statuses import CoordinateSpace, DetectionStatus, TargetFamily
+from yyt1771_af.report.roi_crop import render_roi_crop_png
 from yyt1771_af.services.detection_diagnostics import record_previous_frame_diagnostics
+from yyt1771_af.services.frame_identity import frame_identity, recipe_summary
 from yyt1771_af.services.frame_preview_service import (
     build_frame_preview_metadata,
     build_frame_preview_png,
@@ -35,6 +41,7 @@ from yyt1771_af.services.setup_service import _serialize_detection_result, setup
 from yyt1771_af.services.temperature_service import temperature_service
 from yyt1771_af.vision.detection import detect_target
 from yyt1771_af.vision.detection_debug import DebugLevel
+from yyt1771_af.vision.wire_point_probe import probe_wire_point
 
 # Live Offline Run trades a slightly larger PNG for much cheaper CPU per frame.
 # zlib level 1 encodes a 960px preview in ~13 ms instead of ~115 ms at level 9,
@@ -56,6 +63,13 @@ class OfflineRunOpenRequest(BaseModel):
 
 class OfflineRunSeekRequest(BaseModel):
     frame_index: int = Field(ge=0)
+
+
+class OfflineRunPointProbeRequest(BaseModel):
+    frame_index: int = Field(ge=0)
+    x: float
+    y: float
+    coordinate_space: CoordinateSpace = CoordinateSpace.ACQUISITION
 
 
 class OfflineRunOpenResponse(BaseModel):
@@ -97,6 +111,7 @@ class OfflineRunFrameResponse(BaseModel):
     scale_x: float
     scale_y: float
     coordinate_space: CoordinateSpace = CoordinateSpace.ACQUISITION
+    frame_identity: FrameIdentity
     end_of_stream: bool = False
     detection: dict[str, Any]
     runtime: dict[str, Any]
@@ -123,7 +138,16 @@ class OfflineRunTraceEntry(BaseModel):
     valid: bool
     distance_px: float | None = None
     measurement_line_y: float | None = None
+    selected_line_y: float | None = None
     formal_ab_span_px: float | None = None
+    selected_line_span_px: float | None = None
+    second_best_span_px: float | None = None
+    span_margin_to_second_best_px: float | None = None
+    selected_line_reason: str | None = None
+    top_candidate_lines: list[dict[str, Any]] | None = None
+    source_interval_ids: list[str] | None = None
+    point_a_source_interval_id: str | None = None
+    point_b_source_interval_id: str | None = None
     point_a_source_interval: dict[str, float | None] | None = None
     point_b_source_interval: dict[str, float | None] | None = None
     selected_valid_intervals: list[dict[str, float | None]] | None = None
@@ -428,6 +452,60 @@ class OfflineRunService:
             )
             raise
 
+    def roi_crop_png(self, session_id: str, frame_index: int, *, scale: int = 1) -> bytes:
+        session = self._require_session(session_id)
+        self._require_index(session, frame_index)
+        frame = self._read_frame(session, frame_index)
+        return render_roi_crop_png(
+            frame=frame.image,
+            roi=session.measurement_definition.roi,
+            scale=scale,
+        )
+
+    def probe_point(
+        self,
+        session_id: str,
+        request: OfflineRunPointProbeRequest,
+    ) -> PointProbeResponse:
+        session = self._require_session(session_id)
+        if request.coordinate_space is not CoordinateSpace.ACQUISITION:
+            raise OfflineRunRequestError(
+                error_code="invalid_coordinate_space",
+                message="probe point must be in acquisition coordinates",
+                status_code=400,
+                session_id=session.session_id,
+                frame_index=request.frame_index,
+                frame_name=_frame_name(session, request.frame_index),
+            )
+        self._require_index(session, request.frame_index)
+        frame = self._read_frame(session, request.frame_index)
+        measurement_definition = session.measurement_definition
+        if measurement_definition.target_family is not TargetFamily.WIRE_STRIP or not isinstance(
+            measurement_definition.detector,
+            WireStripDetectorParams,
+        ):
+            raise OfflineRunRequestError(
+                error_code="unsupported_probe_target",
+                message="point probe is only available for wire_strip",
+                status_code=400,
+                session_id=session.session_id,
+                frame_index=request.frame_index,
+                frame_name=_frame_name(session, request.frame_index),
+            )
+        identity = self._frame_identity(
+            session,
+            frame,
+            debug_level="full",
+        )
+        return probe_wire_point(
+            frame=frame.image,
+            roi=measurement_definition.roi,
+            segmentation=measurement_definition.segmentation,
+            params=measurement_definition.detector,
+            point=Point2D(x=request.x, y=request.y),
+            identity=identity,
+        )
+
     def trace(self, session_id: str) -> OfflineRunTraceResponse:
         session = self._require_session(session_id)
         return OfflineRunTraceResponse(
@@ -488,7 +566,11 @@ class OfflineRunService:
             )
         if detection_result.valid:
             session.previous_valid_detection = detection_result
-        detection = _serialize_detection_result(detection_result).model_dump(mode="json")
+        identity = self._frame_identity(session, frame, debug_level=debug_level)
+        detection = _serialize_detection_result(
+            detection_result,
+            frame_identity=identity,
+        ).model_dump(mode="json")
         detector_timings = _diagnostic_timing_payload(detection_result.diagnostics)
         runtime = {
             "run_mode": "live_offline",
@@ -524,6 +606,7 @@ class OfflineRunService:
             scale_x=metadata.scale_x,
             scale_y=metadata.scale_y,
             coordinate_space=CoordinateSpace.ACQUISITION,
+            frame_identity=identity,
             end_of_stream=end_of_stream,
             detection=detection,
             runtime=runtime,
@@ -614,6 +697,27 @@ class OfflineRunService:
             )
             result.frame_ref = frame_ref
         return result
+
+    def _frame_identity(
+        self,
+        session: OfflineRunSession,
+        frame: Frame,
+        *,
+        debug_level: DebugLevel,
+    ) -> FrameIdentity:
+        measurement_definition = session.measurement_definition
+        return frame_identity(
+            frame=frame,
+            source_type="offline",
+            recipe=recipe_summary(
+                target_family=measurement_definition.target_family,
+                recipe_name=measurement_definition.recipe_name,
+                roi=measurement_definition.roi,
+                segmentation=measurement_definition.segmentation,
+                detector=measurement_definition.detector,
+            ),
+            debug_level=debug_level,
+        )
 
     def _read_frame(self, session: OfflineRunSession, frame_index: int) -> Frame:
         self._require_index(session, frame_index)
@@ -733,7 +837,32 @@ class OfflineRunService:
                 valid=bool(detection.get("valid", False)),
                 distance_px=_optional_float(detection.get("distance_px")),
                 measurement_line_y=_optional_float(diagnostics.get("measurement_line_y")),
+                selected_line_y=_optional_float(
+                    diagnostics.get("selected_line_y") or diagnostics.get("measurement_line_y")
+                ),
                 formal_ab_span_px=_optional_float(diagnostics.get("formal_ab_span_px")),
+                selected_line_span_px=_optional_float(
+                    diagnostics.get("selected_line_span_px") or diagnostics.get("formal_ab_span_px")
+                ),
+                second_best_span_px=_optional_float(diagnostics.get("second_best_span_px")),
+                span_margin_to_second_best_px=_optional_float(
+                    diagnostics.get("span_margin_to_second_best_px")
+                ),
+                selected_line_reason=diagnostics.get("selected_line_reason")
+                if isinstance(diagnostics.get("selected_line_reason"), str)
+                else None,
+                top_candidate_lines=_top_candidate_summary(diagnostics.get("top_candidate_lines")),
+                source_interval_ids=_source_interval_ids(diagnostics),
+                point_a_source_interval_id=_source_interval_id(
+                    diagnostics,
+                    diagnostics.get("point_a_source_interval")
+                    or diagnostics.get("formal_point_a_source_interval"),
+                ),
+                point_b_source_interval_id=_source_interval_id(
+                    diagnostics,
+                    diagnostics.get("point_b_source_interval")
+                    or diagnostics.get("formal_point_b_source_interval"),
+                ),
                 point_a_source_interval=_single_interval_summary(
                     diagnostics.get("point_a_source_interval")
                     or diagnostics.get("formal_point_a_source_interval")
@@ -894,6 +1023,73 @@ def _single_interval_summary(value: Any) -> dict[str, float | None] | None:
     if not isinstance(value, dict):
         return None
     return _interval_payload(value)
+
+
+def _top_candidate_summary(value: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(value, list):
+        return None
+    candidates: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        candidates.append(
+            {
+                "rank": _optional_int(item.get("rank")),
+                "selected": _optional_bool(item.get("selected")),
+                "measurement_line_y": _optional_float(item.get("measurement_line_y")),
+                "formal_ab_span_px": _optional_float(item.get("formal_ab_span_px")),
+                "interval_count": _optional_int(item.get("interval_count")),
+                "support_ratio": _optional_float(item.get("support_ratio")),
+                "max_internal_gap_px": _optional_float(item.get("max_internal_gap_px")),
+                "neighbor_line_support": _optional_int(item.get("neighbor_line_support")),
+                "wire_likeness_score": _optional_float(item.get("wire_likeness_score")),
+                "rejected_reason": item.get("rejected_reason")
+                if isinstance(item.get("rejected_reason"), str)
+                else None,
+                "selected_cluster_id": _optional_int(item.get("selected_cluster_id")),
+            }
+        )
+    return candidates or None
+
+
+def _source_interval_ids(diagnostics: dict[str, Any]) -> list[str] | None:
+    ids: list[str] = []
+    selected = diagnostics.get("selected_valid_intervals")
+    if isinstance(selected, list):
+        ids.extend(
+            f"selected:{index}" for index, item in enumerate(selected) if isinstance(item, dict)
+        )
+    rejected_remote = diagnostics.get("rejected_remote_intervals")
+    if isinstance(rejected_remote, list):
+        ids.extend(
+            f"rejected_remote:{index}"
+            for index, item in enumerate(rejected_remote)
+            if isinstance(item, dict)
+        )
+    return ids or None
+
+
+def _source_interval_id(diagnostics: dict[str, Any], interval: Any) -> str | None:
+    if not isinstance(interval, dict):
+        return None
+    selected = diagnostics.get("selected_valid_intervals")
+    if isinstance(selected, list):
+        for index, item in enumerate(selected):
+            if isinstance(item, dict) and _same_interval(item, interval):
+                return f"selected:{index}"
+    rejected_remote = diagnostics.get("rejected_remote_intervals")
+    if isinstance(rejected_remote, list):
+        for index, item in enumerate(rejected_remote):
+            if isinstance(item, dict) and _same_interval(item, interval):
+                return f"rejected_remote:{index}"
+    return None
+
+
+def _same_interval(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return all(
+        _optional_float(left.get(key)) == _optional_float(right.get(key))
+        for key in ("start_local_x", "end_local_x", "width_px", "line_y")
+    )
 
 
 def _interval_payload(item: dict[str, Any]) -> dict[str, float | None]:

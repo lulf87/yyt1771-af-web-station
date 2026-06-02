@@ -203,6 +203,14 @@ Important:
 - A/B must not be gap, background, ROI-boundary, virtual-envelope, or debug-candidate points.
 - A line without enough valid wire interval support is invalid for `wire_strip`.
 - Run detection must choose the current frame's valid candidate line with the largest `formal_ab_span_px`.
+- If multiple valid candidate lines have spans within a very small configured
+  tolerance, the detector may use deterministic tie-break diagnostics such as
+  support ratio, internal gap, interval count, wire-likeness score, and ROI-center
+  proximity. Previous-frame `measurement_line_y` is diagnostic only in this
+  stage and must not override a clearly larger current-frame span.
+- If near-equal candidates are low quality or otherwise unstable, the detector
+  must return an explicit invalid status with null A/B and distance rather than
+  promoting a debug candidate.
 
 Wire foreground filtering (formal):
 

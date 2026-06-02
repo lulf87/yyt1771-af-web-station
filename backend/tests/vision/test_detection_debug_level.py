@@ -108,12 +108,14 @@ def test_wire_basic_matches_full_formal_ab_but_skips_heavy_diagnostics() -> None
 
     assert full.status is DetectionStatus.OK
     _assert_same_formal_result(full, basic)
-    # Heavy diagnostics present at full, skipped at basic.
+    # Heavy interval arrays stay full-only; basic keeps formal source interval
+    # summaries so Live Offline trace can explain A/B origin frame by frame.
     assert full.diagnostics.raw_intervals is not None
     assert basic.diagnostics.raw_intervals is None
     assert basic.diagnostics.bridged_intervals is None
     assert full.diagnostics.selected_valid_intervals is not None
     assert basic.diagnostics.selected_valid_intervals is None
+    assert basic.diagnostics.rejected_remote_intervals is None
     assert basic.diagnostics.point_a_source_interval is not None
     assert basic.diagnostics.point_b_source_interval is not None
     assert basic.diagnostics.selected_bundle_cluster_id is not None

@@ -14,15 +14,20 @@ from yyt1771_af.core.models import (
     BalloonEnvelopeDetectorParams,
     DetectionResult,
     DetectorParams,
+    FrameIdentity,
     FrameRef,
     MeasurementDefinition,
+    Point2D,
+    PointProbeResponse,
     RotatedRoi,
     SegmentationParams,
     WireStripDetectorParams,
 )
 from yyt1771_af.core.statuses import TargetFamily
 from yyt1771_af.report.debug_overlay import render_detection_debug_overlay_png
+from yyt1771_af.report.roi_crop import render_roi_crop_png
 from yyt1771_af.services.camera_service import CameraService, camera_service
+from yyt1771_af.services.frame_identity import frame_identity, recipe_summary
 from yyt1771_af.vision.detection import detect_target
 from yyt1771_af.vision.roi_ops import rotated_roi_mask
 from yyt1771_af.vision.segmentation import (
@@ -33,18 +38,25 @@ from yyt1771_af.vision.segmentation import (
 )
 from yyt1771_af.vision.wire_auto_tune import auto_tune_wire_threshold
 from yyt1771_af.vision.wire_filtering import analyze_wire_components
+from yyt1771_af.vision.wire_point_probe import (
+    probe_wire_point,
+    wire_component_diagnostics,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class DebugOverlayArtifact:
     frame_ref: FrameRef
+    frame_identity: FrameIdentity
     roi: RotatedRoi
     detection: DetectionResult
     raw_foreground_mask: np.ndarray | None
     morphology_foreground_mask: np.ndarray | None
     filled_envelope_mask: np.ndarray | None
     selected_component_mask: np.ndarray | None
+    rejected_component_mask: np.ndarray | None
     selected_contour_mask: np.ndarray | None
+    wire_components: list[object] | None = None
 
 
 class FreezeRequest(BaseModel):
@@ -54,6 +66,7 @@ class FreezeRequest(BaseModel):
 class FreezeResponse(BaseModel):
     frame_ref: FrameRef
     preview_url: str
+    frame_identity: FrameIdentity
 
 
 class SetupDetectRequest(BaseModel):
@@ -76,6 +89,15 @@ class SetupDetectResponse(BaseModel):
     detector: str
     diagnostics: dict[str, Any]
     debug_overlay_url: str | None = None
+    roi_crop_url: str | None = None
+    frame_ref: FrameRef | None = None
+    frame_identity: FrameIdentity | None = None
+
+
+class SetupPointProbeRequest(SetupDetectRequest):
+    x: float
+    y: float
+    coordinate_space: Literal["acquisition"] = "acquisition"
 
 
 class SetupConfirmRequest(BaseModel):
@@ -157,6 +179,10 @@ class SetupService:
         return FreezeResponse(
             frame_ref=frame_ref,
             preview_url=f"/api/camera/frame/{frame.frame_id}/preview.png?max_width=1200",
+            frame_identity=frame_identity(
+                frame=frame,
+                source_type=self._camera.status().source_type,
+            ),
         )
 
     def detect(self, request: SetupDetectRequest) -> SetupDetectResponse:
@@ -177,9 +203,23 @@ class SetupService:
             segmentation=segmentation,
             params=detector_params,
         )
+        result.frame_ref = request.frame_ref
+        identity = frame_identity(
+            frame=frame,
+            source_type=self._camera.status().source_type,
+            recipe=recipe_summary(
+                target_family=request.target_family,
+                recipe_name=request.recipe_name,
+                roi=request.roi,
+                segmentation=segmentation,
+                detector=detector_params,
+            ),
+            debug_level="full",
+        )
         debug_id = f"dbg_{uuid4().hex[:12]}"
         self._debug_artifacts[debug_id] = _build_debug_artifact(
             frame_ref=request.frame_ref,
+            frame_identity=identity,
             frame_image=frame.image,
             roi=request.roi,
             target_family=request.target_family,
@@ -191,6 +231,46 @@ class SetupService:
         return _serialize_detection_result(
             result,
             debug_overlay_url=f"/api/setup/debug-overlay/{debug_id}.png?max_width=1200",
+            roi_crop_url=f"/api/setup/debug-crop/{debug_id}.png?scale=2",
+            frame_identity=identity,
+        )
+
+    def probe_point(self, request: SetupPointProbeRequest) -> PointProbeResponse:
+        if request.coordinate_space != "acquisition":
+            raise ValueError("probe point must be in acquisition coordinates")
+        frame = self._camera.get_frame(request.frame_ref)
+        segmentation = request.segmentation or _segmentation_for_target(
+            request.target_family,
+            request.recipe_name,
+        )
+        detector_params = _detector_params_for_request(
+            request.target_family,
+            request.recipe_name,
+            request.detector,
+        )
+        if request.target_family is not TargetFamily.WIRE_STRIP or not isinstance(
+            detector_params, WireStripDetectorParams
+        ):
+            raise ValueError("point probe is only available for wire_strip")
+        identity = frame_identity(
+            frame=frame,
+            source_type=self._camera.status().source_type,
+            recipe=recipe_summary(
+                target_family=request.target_family,
+                recipe_name=request.recipe_name,
+                roi=request.roi,
+                segmentation=segmentation,
+                detector=detector_params,
+            ),
+            debug_level="full",
+        )
+        return probe_wire_point(
+            frame=frame.image,
+            roi=request.roi,
+            segmentation=segmentation,
+            params=detector_params,
+            point=Point2D(x=request.x, y=request.y),
+            identity=identity,
         )
 
     def auto_tune_wire(self, request: WireAutoTuneRequest) -> WireAutoTuneResponse:
@@ -318,11 +398,14 @@ class SetupService:
             frame=frame.image,
             roi=artifact.roi,
             detection=artifact.detection,
+            frame_identity=artifact.frame_identity,
             raw_foreground_mask=artifact.raw_foreground_mask,
             morphology_foreground_mask=artifact.morphology_foreground_mask,
             filled_envelope_mask=artifact.filled_envelope_mask,
             selected_component_mask=artifact.selected_component_mask,
+            rejected_component_mask=artifact.rejected_component_mask,
             selected_contour_mask=artifact.selected_contour_mask,
+            wire_components=artifact.wire_components,
             max_width=max_width,
             max_height=max_height,
             show_raw_foreground=show_raw_foreground,
@@ -331,6 +414,13 @@ class SetupService:
             show_selected_contour=show_selected_contour,
             show_rejected_candidates=show_rejected_candidates,
         )
+
+    def debug_crop_png(self, debug_id: str, *, scale: int = 1) -> bytes:
+        artifact = self._debug_artifacts.get(debug_id)
+        if artifact is None:
+            raise KeyError(f"debug crop {debug_id} is not available")
+        frame = self._camera.get_frame(artifact.frame_ref)
+        return render_roi_crop_png(frame=frame.image, roi=artifact.roi, scale=scale)
 
     def _trim_debug_artifacts(self) -> None:
         while len(self._debug_artifacts) > 4:
@@ -368,6 +458,8 @@ def _serialize_detection_result(
     result: DetectionResult,
     *,
     debug_overlay_url: str | None = None,
+    roi_crop_url: str | None = None,
+    frame_identity: FrameIdentity | None = None,
 ) -> SetupDetectResponse:
     diagnostics = result.diagnostics.model_dump(mode="json", exclude_none=True)
     detector_kind = diagnostics.pop("detector")
@@ -383,12 +475,16 @@ def _serialize_detection_result(
         detector=f"{detector_kind}:{detector_version}",
         diagnostics=diagnostics,
         debug_overlay_url=debug_overlay_url,
+        roi_crop_url=roi_crop_url,
+        frame_ref=result.frame_ref,
+        frame_identity=frame_identity,
     )
 
 
 def _build_debug_artifact(
     *,
     frame_ref: FrameRef,
+    frame_identity: FrameIdentity,
     frame_image: np.ndarray,
     roi: RotatedRoi,
     target_family: TargetFamily,
@@ -420,17 +516,25 @@ def _build_debug_artifact(
         else:
             foreground = layers.morphology_foreground
         components = connected_components(foreground, segmentation.min_component_area_px)
+        rejected_component_mask: np.ndarray | None = None
+        wire_components = None
         if target_family is TargetFamily.WIRE_STRIP and isinstance(
             detector_params, WireStripDetectorParams
         ):
-            selected_component_mask = analyze_wire_components(
+            wire_analysis = analyze_wire_components(
                 image=frame_image,
                 roi=roi,
                 roi_mask=roi_mask,
                 foreground=foreground,
                 components=components,
                 params=detector_params,
-            ).wire_foreground
+            )
+            selected_component_mask = wire_analysis.wire_foreground
+            rejected_component_mask = np.zeros_like(foreground, dtype=bool)
+            for component, metric in zip(components, wire_analysis.metrics, strict=False):
+                if not metric.accepted:
+                    rejected_component_mask |= component.mask
+            wire_components = wire_component_diagnostics(wire_analysis)
         elif (
             target_family is TargetFamily.BALLOON_ENVELOPE
             and isinstance(detector_params, BalloonEnvelopeDetectorParams)
@@ -449,16 +553,21 @@ def _build_debug_artifact(
         layers = None
         filled_envelope = None
         selected_component_mask = None
+        rejected_component_mask = None
         selected_contour_mask = None
+        wire_components = None
     return DebugOverlayArtifact(
         frame_ref=frame_ref,
+        frame_identity=frame_identity,
         roi=roi,
         detection=detection,
         raw_foreground_mask=layers.raw_foreground if layers is not None else None,
         morphology_foreground_mask=layers.morphology_foreground if layers is not None else None,
         filled_envelope_mask=filled_envelope,
         selected_component_mask=selected_component_mask,
+        rejected_component_mask=rejected_component_mask,
         selected_contour_mask=selected_contour_mask,
+        wire_components=wire_components,
     )
 
 

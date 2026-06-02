@@ -9,6 +9,7 @@ import numpy as np
 from yyt1771_af.core.geometry import euclidean_distance, roi_inside_frame, roi_measurement_direction
 from yyt1771_af.core.models import (
     BundleClusterDiagnostics,
+    CandidateLineDiagnostics,
     ComponentBBox,
     DetectionDiagnostics,
     DetectionResult,
@@ -143,6 +144,16 @@ class ContactSelection:
     mesh_outer_span_px: float | None = None
     bundle_outer_span_px: float | None = None
     formal_ab_span_px: float | None = None
+    selected_line_rank: int | None = None
+    top_candidate_lines: list[CandidateLineDiagnostics] | None = None
+    candidate_count: int | None = None
+    ambiguous_candidate_count: int | None = None
+    selected_line_span_px: float | None = None
+    second_best_span_px: float | None = None
+    span_margin_to_second_best_px: float | None = None
+    selected_line_support_ratio: float | None = None
+    selected_line_max_internal_gap_px: float | None = None
+    selected_line_interval_count: int | None = None
     virtual_envelope_span_px: float | None = None
     candidate_line_is_debug_only: bool | None = None
     selected_line_reason: str | None = None
@@ -203,6 +214,16 @@ class ContactDebug:
     mesh_outer_span_px: float | None = None
     bundle_outer_span_px: float | None = None
     formal_ab_span_px: float | None = None
+    selected_line_rank: int | None = None
+    top_candidate_lines: list[CandidateLineDiagnostics] | None = None
+    candidate_count: int | None = None
+    ambiguous_candidate_count: int | None = None
+    selected_line_span_px: float | None = None
+    second_best_span_px: float | None = None
+    span_margin_to_second_best_px: float | None = None
+    selected_line_support_ratio: float | None = None
+    selected_line_max_internal_gap_px: float | None = None
+    selected_line_interval_count: int | None = None
     virtual_envelope_span_px: float | None = None
     candidate_line_is_debug_only: bool | None = None
     selected_line_reason: str | None = None
@@ -272,10 +293,22 @@ class _LineCandidate:
     mesh_outer_span_px: float | None = None
     bundle_outer_span_px: float | None = None
     formal_ab_span_px: float | None = None
+    selected_line_rank: int | None = None
+    top_candidate_lines: list[CandidateLineDiagnostics] | None = None
+    candidate_count: int | None = None
+    ambiguous_candidate_count: int | None = None
+    selected_line_span_px: float | None = None
+    second_best_span_px: float | None = None
+    span_margin_to_second_best_px: float | None = None
+    selected_line_support_ratio: float | None = None
+    selected_line_max_internal_gap_px: float | None = None
+    selected_line_interval_count: int | None = None
     virtual_envelope_span_px: float | None = None
     candidate_line_is_debug_only: bool | None = None
     selected_line_reason: str | None = None
     neighbor_line_support: int | None = None
+    rejected_reason: str | None = None
+    wire_likeness_score: float | None = None
     score: float = 0.0
     # When True the diagnostic raw/bridged/virtual-envelope intervals are computed
     # lazily (only if this candidate is the one selected) instead of for every
@@ -294,6 +327,20 @@ class _BundleCluster:
     total_interval_width_px: float
     support_ratio: float
     max_internal_gap_px: float
+
+
+@dataclass(frozen=True, slots=True)
+class _CandidateSelection:
+    candidate: _LineCandidate
+    top_candidate_lines: list[CandidateLineDiagnostics]
+    selected_line_rank: int
+    candidate_count: int
+    ambiguous_candidate_count: int
+    selected_line_span_px: float | None
+    second_best_span_px: float | None
+    span_margin_to_second_best_px: float | None
+    selected_line_reason: str
+    ambiguous: bool = False
 
 
 def rotated_roi_mask(shape: tuple[int, int], roi: RotatedRoi) -> np.ndarray:
@@ -477,6 +524,9 @@ def select_roi_local_chord_contacts_debug(
     prefer_largest_formal_span: bool = False,
     reject_global_foreground_boundary: bool = True,
     max_internal_gap_px: float | None = None,
+    min_support_ratio: float = 0.0,
+    span_tie_tolerance_px: float = 2.0,
+    wire_likeness_score: float | None = None,
     compute_debug_intervals: bool = True,
     timings_ms: dict[str, float] | None = None,
 ) -> ContactSelection | ContactRejection:
@@ -550,6 +600,7 @@ def select_roi_local_chord_contacts_debug(
         return intervals_for_line
 
     candidates: list[_LineCandidate] = []
+    rejected_quality: list[_LineCandidate] = []
     rejected_boundary: list[_LineCandidate] = []
     mismatched: list[_LineCandidate] = []
     for local_y in _measurement_line_values(roi, line_step_px):
@@ -579,6 +630,8 @@ def select_roi_local_chord_contacts_debug(
                 selected_line_reason=(
                     "max_formal_ab_span" if prefer_largest_formal_span else "highest_line_score"
                 ),
+                min_support_ratio=min_support_ratio,
+                wire_likeness_score=wire_likeness_score,
             )
         else:
             candidate = _build_line_candidate(
@@ -603,6 +656,9 @@ def select_roi_local_chord_contacts_debug(
                 )
             )
             continue
+        if candidate.rejected_reason is not None:
+            rejected_quality.append(candidate)
+            continue
         left_rejected = candidate.distance_to_left_roi_boundary_px <= boundary_margin_px
         right_rejected = candidate.distance_to_right_roi_boundary_px <= boundary_margin_px
         if reject_contact_on_roi_boundary and (left_rejected or right_rejected):
@@ -616,10 +672,24 @@ def select_roi_local_chord_contacts_debug(
         candidates.append(candidate)
 
     if candidates:
-        candidate = _best_line_candidate(
+        selected = _select_best_line_candidate(
             candidates,
             prefer_largest_formal_span=prefer_largest_formal_span,
+            span_tie_tolerance_px=span_tie_tolerance_px,
+            rejected_candidates=[*rejected_quality, *rejected_boundary],
         )
+        if selected.ambiguous:
+            candidate = _with_candidate_selection_diagnostics(selected.candidate, selected)
+            _finish_timing()
+            return ContactRejection(
+                status=DetectionStatus.CALIPER_CONTACT_AMBIGUOUS,
+                debug=_candidate_to_debug(
+                    _attach_debug_intervals(candidate),
+                    roi,
+                    boundary_margin_px,
+                ),
+            )
+        candidate = _with_candidate_selection_diagnostics(selected.candidate, selected)
         if (
             global_margins is not None
             and reject_contact_on_roi_boundary
@@ -652,6 +722,18 @@ def select_roi_local_chord_contacts_debug(
                 )
         _finish_timing()
         return _candidate_to_selection(_attach_debug_intervals(candidate))
+    if rejected_quality:
+        selected = _select_best_line_candidate(
+            rejected_quality,
+            prefer_largest_formal_span=prefer_largest_formal_span,
+            span_tie_tolerance_px=span_tie_tolerance_px,
+        )
+        candidate = _with_candidate_selection_diagnostics(selected.candidate, selected)
+        _finish_timing()
+        return ContactRejection(
+            status=DetectionStatus.QUALITY_BELOW_THRESHOLD,
+            debug=_candidate_to_debug(_attach_debug_intervals(candidate), roi, boundary_margin_px),
+        )
     if rejected_boundary:
         candidate = _best_line_candidate(
             rejected_boundary,
@@ -1333,6 +1415,8 @@ def _build_mesh_outer_span_candidate(
     selected_line_reason: str,
     max_internal_gap_px: float | None = None,
     neighbor_interval_lookup: Callable[[float], list[ObjectInterval]] | None = None,
+    min_support_ratio: float = 0.0,
+    wire_likeness_score: float | None = None,
 ) -> _LineCandidate | None:
     supported_intervals = _valid_mesh_intervals(
         intervals,
@@ -1403,6 +1487,9 @@ def _build_mesh_outer_span_candidate(
     gaps = _interval_gaps(valid_intervals)
     total_support_width = selected_cluster.total_interval_width_px
     coverage_ratio = selected_cluster.support_ratio
+    rejected_reason = None
+    if coverage_ratio < min_support_ratio:
+        rejected_reason = "support_ratio_below_min"
     left_margin = leftmost.start_local_x + roi.width / 2.0
     right_margin = roi.width / 2.0 - rightmost.end_local_x
     max_gap = max(gaps) if gaps else 0.0
@@ -1462,6 +1549,8 @@ def _build_mesh_outer_span_candidate(
         candidate_line_is_debug_only=False,
         selected_line_reason=selected_line_reason,
         neighbor_line_support=neighbor_support,
+        rejected_reason=rejected_reason,
+        wire_likeness_score=wire_likeness_score,
         score=score,
         carries_debug_intervals=True,
     )
@@ -1536,6 +1625,8 @@ def _candidate_from_local_span(
     candidate_line_is_debug_only: bool | None = None,
     selected_line_reason: str | None = None,
     neighbor_line_support: int | None = None,
+    rejected_reason: str | None = None,
+    wire_likeness_score: float | None = None,
     score: float = 0.0,
     carries_debug_intervals: bool = False,
 ) -> _LineCandidate:
@@ -1601,6 +1692,8 @@ def _candidate_from_local_span(
         candidate_line_is_debug_only=candidate_line_is_debug_only,
         selected_line_reason=selected_line_reason,
         neighbor_line_support=neighbor_line_support,
+        rejected_reason=rejected_reason,
+        wire_likeness_score=wire_likeness_score,
         score=score,
         carries_debug_intervals=carries_debug_intervals,
     )
@@ -1647,62 +1740,223 @@ def _best_line_candidate(
     )
 
 
+def _candidate_span(candidate: _LineCandidate) -> float:
+    return float(
+        candidate.formal_ab_span_px
+        if candidate.formal_ab_span_px is not None
+        else candidate.chord_length_px
+    )
+
+
+def _candidate_support_ratio(candidate: _LineCandidate) -> float:
+    return float(candidate.selected_bundle_support_ratio or 0.0)
+
+
+def _candidate_max_gap(candidate: _LineCandidate) -> float:
+    return float(
+        candidate.selected_bundle_max_internal_gap_px or candidate.max_internal_gap_px or 0.0
+    )
+
+
+def _candidate_interval_count(candidate: _LineCandidate) -> int:
+    return int(candidate.selected_bundle_interval_count or candidate.interval_count)
+
+
+def _candidate_tie_key(candidate: _LineCandidate) -> tuple[float, float, int, float, float]:
+    return (
+        _candidate_support_ratio(candidate),
+        -_candidate_max_gap(candidate),
+        _candidate_interval_count(candidate),
+        float(candidate.wire_likeness_score or 0.0),
+        -abs(candidate.measurement_line_y),
+    )
+
+
+def _select_best_line_candidate(
+    candidates: list[_LineCandidate],
+    *,
+    prefer_largest_formal_span: bool = False,
+    span_tie_tolerance_px: float = 2.0,
+    rejected_candidates: list[_LineCandidate] | None = None,
+) -> _CandidateSelection:
+    span_ranked = sorted(
+        candidates,
+        key=lambda candidate: (
+            _candidate_span(candidate),
+            candidate.score,
+            candidate.chord_length_px,
+            -abs(candidate.measurement_line_y),
+        ),
+        reverse=True,
+    )
+    if not prefer_largest_formal_span:
+        selected = _best_line_candidate(candidates, prefer_largest_formal_span=False)
+    else:
+        top_span = _candidate_span(span_ranked[0])
+        tie_group = [
+            candidate
+            for candidate in span_ranked
+            if top_span - _candidate_span(candidate) <= span_tie_tolerance_px
+        ]
+        selected = max(tie_group, key=_candidate_tie_key)
+    original_selected_rank = span_ranked.index(selected) + 1
+    final_ranked = [
+        selected,
+        *[candidate for candidate in span_ranked if candidate is not selected],
+    ]
+    selected_rank = 1
+    second_best_span = _candidate_span(final_ranked[1]) if len(final_ranked) > 1 else None
+    selected_span = _candidate_span(selected)
+    margin = None if second_best_span is None else abs(selected_span - second_best_span)
+    ambiguous_count = (
+        sum(
+            1
+            for candidate in span_ranked
+            if _candidate_span(span_ranked[0]) - _candidate_span(candidate) <= span_tie_tolerance_px
+        )
+        if prefer_largest_formal_span
+        else 0
+    )
+    selected_reason = _selected_line_reason(
+        selected,
+        span_ranked,
+        selected_rank=original_selected_rank,
+        span_tie_tolerance_px=span_tie_tolerance_px,
+        prefer_largest_formal_span=prefer_largest_formal_span,
+    )
+    ambiguous = _line_selection_is_ambiguous(
+        span_ranked,
+        span_tie_tolerance_px=span_tie_tolerance_px,
+    )
+    top_candidates = _candidate_diagnostics(
+        final_ranked,
+        selected=selected,
+        rejected_candidates=rejected_candidates or [],
+    )
+    return _CandidateSelection(
+        candidate=selected,
+        top_candidate_lines=top_candidates,
+        selected_line_rank=selected_rank,
+        candidate_count=len(candidates),
+        ambiguous_candidate_count=ambiguous_count,
+        selected_line_span_px=selected_span,
+        second_best_span_px=second_best_span,
+        span_margin_to_second_best_px=margin,
+        selected_line_reason=selected_reason,
+        ambiguous=ambiguous,
+    )
+
+
+def _selected_line_reason(
+    selected: _LineCandidate,
+    span_ranked: list[_LineCandidate],
+    *,
+    selected_rank: int,
+    span_tie_tolerance_px: float,
+    prefer_largest_formal_span: bool,
+) -> str:
+    if not prefer_largest_formal_span or len(span_ranked) < 2:
+        return selected.selected_line_reason or "highest_line_score"
+    top_span = _candidate_span(span_ranked[0])
+    second_span = _candidate_span(span_ranked[1])
+    if top_span - second_span > span_tie_tolerance_px:
+        return "max_formal_ab_span"
+    if selected_rank > 1:
+        return "span_tie_break_support_ratio"
+    return "max_formal_ab_span"
+
+
+def _line_selection_is_ambiguous(
+    span_ranked: list[_LineCandidate],
+    *,
+    span_tie_tolerance_px: float,
+) -> bool:
+    if len(span_ranked) < 2:
+        return False
+    top_span = _candidate_span(span_ranked[0])
+    tie_group = [
+        candidate
+        for candidate in span_ranked
+        if top_span - _candidate_span(candidate) <= span_tie_tolerance_px
+    ]
+    if len(tie_group) < 2:
+        return False
+    if not all(candidate.selected_bundle_support_ratio is not None for candidate in tie_group):
+        return False
+    low_quality = all(_candidate_support_ratio(candidate) < 0.15 for candidate in tie_group)
+    if not low_quality:
+        return False
+    first = tie_group[0]
+    return any(
+        abs(candidate.measurement_line_y - first.measurement_line_y) > 1.0
+        for candidate in tie_group[1:]
+    )
+
+
+def _candidate_diagnostics(
+    span_ranked: list[_LineCandidate],
+    *,
+    selected: _LineCandidate,
+    rejected_candidates: list[_LineCandidate],
+    limit: int = 5,
+) -> list[CandidateLineDiagnostics]:
+    ranked = [*span_ranked, *sorted(rejected_candidates, key=_candidate_span, reverse=True)]
+    diagnostics: list[CandidateLineDiagnostics] = []
+    seen: set[tuple[float, float | None, str | None]] = set()
+    for candidate in ranked:
+        key = (candidate.measurement_line_y, candidate.formal_ab_span_px, candidate.rejected_reason)
+        if key in seen:
+            continue
+        seen.add(key)
+        diagnostics.append(
+            CandidateLineDiagnostics(
+                rank=span_ranked.index(candidate) + 1 if candidate in span_ranked else None,
+                selected=candidate is selected,
+                measurement_line_y=candidate.measurement_line_y,
+                formal_ab_span_px=candidate.formal_ab_span_px,
+                interval_count=_candidate_interval_count(candidate),
+                support_ratio=candidate.selected_bundle_support_ratio,
+                max_internal_gap_px=candidate.selected_bundle_max_internal_gap_px
+                if candidate.selected_bundle_max_internal_gap_px is not None
+                else candidate.max_internal_gap_px,
+                neighbor_line_support=candidate.neighbor_line_support,
+                wire_likeness_score=candidate.wire_likeness_score,
+                rejected_reason=candidate.rejected_reason,
+                selected_cluster_id=candidate.selected_bundle_cluster_id,
+            )
+        )
+        if len(diagnostics) >= limit:
+            break
+    return diagnostics
+
+
+def _with_candidate_selection_diagnostics(
+    candidate: _LineCandidate,
+    selected: _CandidateSelection,
+) -> _LineCandidate:
+    return replace(
+        candidate,
+        selected_line_rank=selected.selected_line_rank,
+        top_candidate_lines=selected.top_candidate_lines,
+        candidate_count=selected.candidate_count,
+        ambiguous_candidate_count=selected.ambiguous_candidate_count,
+        selected_line_span_px=selected.selected_line_span_px,
+        second_best_span_px=selected.second_best_span_px,
+        span_margin_to_second_best_px=selected.span_margin_to_second_best_px,
+        selected_line_support_ratio=candidate.selected_bundle_support_ratio,
+        selected_line_max_internal_gap_px=candidate.selected_bundle_max_internal_gap_px,
+        selected_line_interval_count=candidate.selected_bundle_interval_count,
+        selected_line_reason=selected.selected_line_reason,
+    )
+
+
 def _replace_rejected_side(candidate: _LineCandidate, rejected_side: str | None) -> _LineCandidate:
-    return _LineCandidate(
-        point_a=candidate.point_a,
-        point_b=candidate.point_b,
-        point_a_local=candidate.point_a_local,
-        point_b_local=candidate.point_b_local,
-        measurement_line_y=candidate.measurement_line_y,
-        chord_length_px=candidate.chord_length_px,
-        intervals=candidate.intervals,
-        pattern_model=candidate.pattern_model,
-        detected_pattern=candidate.detected_pattern,
-        object_interval_count=candidate.object_interval_count,
-        interval_count=candidate.interval_count,
-        contour_point_count=candidate.contour_point_count,
-        distance_to_left_roi_boundary_px=candidate.distance_to_left_roi_boundary_px,
-        distance_to_right_roi_boundary_px=candidate.distance_to_right_roi_boundary_px,
+    return replace(
+        candidate,
         rejected_side=rejected_side,
-        measurement_mode=candidate.measurement_mode,
-        raw_intervals=candidate.raw_intervals,
-        bridged_intervals=candidate.bridged_intervals,
-        selected_valid_intervals=candidate.selected_valid_intervals,
-        leftmost_valid_interval=candidate.leftmost_valid_interval,
-        rightmost_valid_interval=candidate.rightmost_valid_interval,
-        interval_gaps=candidate.interval_gaps,
-        bundle_cluster_count=candidate.bundle_cluster_count,
-        bundle_clusters=candidate.bundle_clusters,
-        selected_bundle_cluster_id=candidate.selected_bundle_cluster_id,
-        selected_bundle_interval_count=candidate.selected_bundle_interval_count,
-        selected_bundle_outer_span_px=candidate.selected_bundle_outer_span_px,
-        selected_bundle_support_ratio=candidate.selected_bundle_support_ratio,
-        selected_bundle_max_internal_gap_px=candidate.selected_bundle_max_internal_gap_px,
-        max_bundle_internal_gap_px=candidate.max_bundle_internal_gap_px,
-        rejected_remote_intervals=candidate.rejected_remote_intervals,
-        rejected_remote_interval_reasons=candidate.rejected_remote_interval_reasons,
-        remote_interval_rejection_count=candidate.remote_interval_rejection_count,
-        point_a_source_interval=candidate.point_a_source_interval,
-        point_b_source_interval=candidate.point_b_source_interval,
-        formal_point_a_source_interval=candidate.formal_point_a_source_interval,
-        formal_point_b_source_interval=candidate.formal_point_b_source_interval,
-        point_a_on_foreground_boundary=candidate.point_a_on_foreground_boundary,
-        point_b_on_foreground_boundary=candidate.point_b_on_foreground_boundary,
-        point_a_source_layer=candidate.point_a_source_layer,
-        point_b_source_layer=candidate.point_b_source_layer,
-        internal_gap_count=candidate.internal_gap_count,
-        max_internal_gap_px=candidate.max_internal_gap_px,
-        mesh_outer_span_px=candidate.mesh_outer_span_px,
-        bundle_outer_span_px=candidate.bundle_outer_span_px,
-        formal_ab_span_px=candidate.formal_ab_span_px,
-        virtual_envelope_span_px=candidate.virtual_envelope_span_px,
         candidate_line_is_debug_only=True
         if candidate.candidate_line_is_debug_only is None
         else candidate.candidate_line_is_debug_only,
-        selected_line_reason=candidate.selected_line_reason,
-        neighbor_line_support=candidate.neighbor_line_support,
-        score=candidate.score,
-        carries_debug_intervals=candidate.carries_debug_intervals,
     )
 
 
@@ -1757,6 +2011,16 @@ def _candidate_to_selection(candidate: _LineCandidate) -> ContactSelection:
         mesh_outer_span_px=candidate.mesh_outer_span_px,
         bundle_outer_span_px=candidate.bundle_outer_span_px,
         formal_ab_span_px=candidate.formal_ab_span_px,
+        selected_line_rank=candidate.selected_line_rank,
+        top_candidate_lines=candidate.top_candidate_lines,
+        candidate_count=candidate.candidate_count,
+        ambiguous_candidate_count=candidate.ambiguous_candidate_count,
+        selected_line_span_px=candidate.selected_line_span_px,
+        second_best_span_px=candidate.second_best_span_px,
+        span_margin_to_second_best_px=candidate.span_margin_to_second_best_px,
+        selected_line_support_ratio=candidate.selected_line_support_ratio,
+        selected_line_max_internal_gap_px=candidate.selected_line_max_internal_gap_px,
+        selected_line_interval_count=candidate.selected_line_interval_count,
         virtual_envelope_span_px=candidate.virtual_envelope_span_px,
         candidate_line_is_debug_only=candidate.candidate_line_is_debug_only,
         selected_line_reason=candidate.selected_line_reason,
@@ -1820,6 +2084,16 @@ def _candidate_to_debug(
         mesh_outer_span_px=candidate.mesh_outer_span_px,
         bundle_outer_span_px=candidate.bundle_outer_span_px,
         formal_ab_span_px=candidate.formal_ab_span_px,
+        selected_line_rank=candidate.selected_line_rank,
+        top_candidate_lines=candidate.top_candidate_lines,
+        candidate_count=candidate.candidate_count,
+        ambiguous_candidate_count=candidate.ambiguous_candidate_count,
+        selected_line_span_px=candidate.selected_line_span_px,
+        second_best_span_px=candidate.second_best_span_px,
+        span_margin_to_second_best_px=candidate.span_margin_to_second_best_px,
+        selected_line_support_ratio=candidate.selected_line_support_ratio,
+        selected_line_max_internal_gap_px=candidate.selected_line_max_internal_gap_px,
+        selected_line_interval_count=candidate.selected_line_interval_count,
         virtual_envelope_span_px=candidate.virtual_envelope_span_px,
         candidate_line_is_debug_only=True
         if candidate.candidate_line_is_debug_only is None
@@ -1882,6 +2156,16 @@ def _chord_debug(
     mesh_outer_span_px: float | None = None,
     bundle_outer_span_px: float | None = None,
     formal_ab_span_px: float | None = None,
+    selected_line_rank: int | None = None,
+    top_candidate_lines: list[CandidateLineDiagnostics] | None = None,
+    candidate_count: int | None = None,
+    ambiguous_candidate_count: int | None = None,
+    selected_line_span_px: float | None = None,
+    second_best_span_px: float | None = None,
+    span_margin_to_second_best_px: float | None = None,
+    selected_line_support_ratio: float | None = None,
+    selected_line_max_internal_gap_px: float | None = None,
+    selected_line_interval_count: int | None = None,
     virtual_envelope_span_px: float | None = None,
     candidate_line_is_debug_only: bool | None = None,
     selected_line_reason: str | None = None,
@@ -1943,6 +2227,16 @@ def _chord_debug(
         mesh_outer_span_px=mesh_outer_span_px,
         bundle_outer_span_px=bundle_outer_span_px,
         formal_ab_span_px=formal_ab_span_px,
+        selected_line_rank=selected_line_rank,
+        top_candidate_lines=top_candidate_lines,
+        candidate_count=candidate_count,
+        ambiguous_candidate_count=ambiguous_candidate_count,
+        selected_line_span_px=selected_line_span_px,
+        second_best_span_px=second_best_span_px,
+        span_margin_to_second_best_px=span_margin_to_second_best_px,
+        selected_line_support_ratio=selected_line_support_ratio,
+        selected_line_max_internal_gap_px=selected_line_max_internal_gap_px,
+        selected_line_interval_count=selected_line_interval_count,
         virtual_envelope_span_px=virtual_envelope_span_px,
         candidate_line_is_debug_only=candidate_line_is_debug_only,
         selected_line_reason=selected_line_reason,

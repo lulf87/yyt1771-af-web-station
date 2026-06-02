@@ -35,6 +35,8 @@ describe("setup recipe defaults", () => {
     expect(recipe.detector.min_local_contrast_score).toBe(8);
     expect(recipe.detector.max_bundle_internal_gap_px).toBe(60);
     expect(recipe.detector.max_bundle_internal_gap_ratio).toBe(1);
+    expect(recipe.detector.min_support_ratio).toBe(0.08);
+    expect(recipe.detector.span_tie_tolerance_px).toBe(2);
     expect(recipe.detector.enable_remote_interval_rejection).toBe(true);
     expect(recipe.detector.enable_local_contrast_filter).toBe(true);
     expect(recipe.detector.enable_orientation_scoring).toBe(true);

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
+from yyt1771_af.core.models import PointProbeResponse
 from yyt1771_af.services.setup_service import (
     FreezeRequest,
     FreezeResponse,
@@ -9,6 +10,7 @@ from yyt1771_af.services.setup_service import (
     SetupConfirmResponse,
     SetupDetectRequest,
     SetupDetectResponse,
+    SetupPointProbeRequest,
     WireAutoTuneRequest,
     WireAutoTuneResponse,
     setup_service,
@@ -33,6 +35,16 @@ def detect_setup_frame(request: SetupDetectRequest) -> SetupDetectResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/probe-point", response_model=PointProbeResponse)
+def probe_setup_point(request: SetupPointProbeRequest) -> PointProbeResponse:
+    try:
+        return setup_service.probe_point(request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/wire-auto-tune", response_model=WireAutoTuneResponse)
@@ -77,6 +89,20 @@ def get_setup_debug_overlay(
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="debug overlay is not available") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(content=png, media_type="image/png")
+
+
+@router.get("/debug-crop/{debug_id}.png")
+def get_setup_debug_crop(
+    debug_id: str,
+    scale: int = Query(default=1, ge=1, le=4),
+) -> Response:
+    try:
+        png = setup_service.debug_crop_png(debug_id, scale=scale)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="debug crop is not available") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(content=png, media_type="image/png")

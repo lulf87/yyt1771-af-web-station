@@ -5,7 +5,7 @@ import math
 import numpy as np
 
 from yyt1771_af.core.geometry import roi_measurement_direction, rotated_roi_corners
-from yyt1771_af.core.models import DetectionResult, Point2D, RotatedRoi
+from yyt1771_af.core.models import DetectionResult, FrameIdentity, Point2D, RotatedRoi
 from yyt1771_af.report.simple_png import (
     draw_circle,
     draw_line,
@@ -92,6 +92,9 @@ def render_detection_debug_overlay_png(
     filled_envelope_mask: np.ndarray | None,
     selected_component_mask: np.ndarray | None,
     selected_contour_mask: np.ndarray | None,
+    frame_identity: FrameIdentity | None = None,
+    rejected_component_mask: np.ndarray | None = None,
+    wire_components: list[object] | None = None,
     max_width: int = 1200,
     max_height: int | None = None,
     show_raw_foreground: bool = True,
@@ -145,6 +148,12 @@ def render_detection_debug_overlay_png(
             (255, 110, 60),
             0.18,
         )
+    _blend_mask(
+        rgb,
+        _downsample_mask(rejected_component_mask, y_indices, x_indices),
+        (190, 80, 255),
+        0.32,
+    )
     if show_selected_contour:
         _blend_mask(
             rgb,
@@ -190,6 +199,13 @@ def render_detection_debug_overlay_png(
         scaled_roi,
         measurement_line_y,
     )
+    _draw_candidate_lines(
+        pixels,
+        display_width,
+        scaled_roi,
+        detection.diagnostics.top_candidate_lines,
+        scale_y,
+    )
     _draw_interval_segments(
         pixels,
         display_width,
@@ -200,6 +216,7 @@ def render_detection_debug_overlay_png(
         (60, 180, 255),
         thickness=1,
     )
+    _draw_component_boxes(pixels, display_width, wire_components, scale_x, scale_y)
     _draw_interval_segments(
         pixels,
         display_width,
@@ -272,7 +289,7 @@ def render_detection_debug_overlay_png(
             thickness=2,
         )
 
-    draw_rect(pixels, display_width, 0, 0, min(display_width - 1, 900), 70, (0, 0, 0))
+    draw_rect(pixels, display_width, 0, 0, min(display_width - 1, 980), 88, (0, 0, 0))
     status_text = detection.status.value
     polarity_text = detection.diagnostics.selected_polarity or "-"
     pattern_text = detection.diagnostics.detected_pattern or "-"
@@ -321,6 +338,19 @@ def render_detection_debug_overlay_png(
             (255, 174, 66),
             scale=1,
         )
+    if frame_identity is not None:
+        name = frame_identity.frame_name or "-"
+        index = "-" if frame_identity.frame_index is None else str(frame_identity.frame_index)
+        debug_level = frame_identity.debug_level or "-"
+        draw_text(
+            pixels,
+            display_width,
+            8,
+            70,
+            f"FRAME:{name} IDX:{index} SRC:{frame_identity.source_type} DBG:{debug_level}",
+            (190, 220, 255),
+            scale=1,
+        )
     wire_likeness = detection.diagnostics.wire_likeness_score
     if wire_likeness is not None:
         broad_blob = detection.diagnostics.broad_blob_rejection_count or 0
@@ -350,6 +380,40 @@ def _downsample_mask(
     if mask is None:
         return None
     return np.asarray(mask, dtype=bool)[np.ix_(y_indices, x_indices)]
+
+
+def _draw_component_boxes(
+    pixels: bytearray,
+    width: int,
+    components: list[object] | None,
+    scale_x: float,
+    scale_y: float,
+) -> None:
+    if not components:
+        return
+    for component in components:
+        accepted = bool(_component_value(component, "accepted"))
+        bbox = _component_value(component, "bbox")
+        component_id = _component_value(component, "component_id")
+        if bbox is None:
+            continue
+        min_x = int(round(float(_component_value(bbox, "min_x")) * scale_x))
+        min_y = int(round(float(_component_value(bbox, "min_y")) * scale_y))
+        max_x = int(round(float(_component_value(bbox, "max_x")) * scale_x))
+        max_y = int(round(float(_component_value(bbox, "max_y")) * scale_y))
+        color = (80, 255, 180) if accepted else (255, 96, 220)
+        draw_rect(pixels, width, min_x, min_y, max_x, min_y, color)
+        draw_rect(pixels, width, min_x, max_y, max_x, max_y, color)
+        draw_rect(pixels, width, min_x, min_y, min_x, max_y, color)
+        draw_rect(pixels, width, max_x, min_y, max_x, max_y, color)
+        if component_id is not None:
+            draw_text(pixels, width, min_x, max(0, min_y - 8), f"C{component_id}", color, scale=1)
+
+
+def _component_value(component: object, name: str) -> object:
+    if isinstance(component, dict):
+        return component.get(name)
+    return getattr(component, name, None)
 
 
 def _blend_mask(
@@ -459,6 +523,99 @@ def _draw_measurement_line(
         (120, 255, 255),
         scale=1,
     )
+
+
+def _draw_candidate_lines(
+    pixels: bytearray,
+    width: int,
+    roi: RotatedRoi,
+    candidates: object,
+    scale_y: float,
+) -> None:
+    if not isinstance(candidates, list):
+        return
+    for index, candidate in enumerate(candidates[:2]):
+        line_y = _candidate_line_y(candidate)
+        if line_y is None:
+            continue
+        selected = bool(_component_value(candidate, "selected"))
+        color = (80, 255, 180) if selected else (190, 120, 255)
+        x0, y0, x1, y1 = _roi_local_line_endpoints(roi, line_y * scale_y)
+        _draw_dashed_line(
+            pixels,
+            width,
+            int(round(x0)),
+            int(round(y0)),
+            int(round(x1)),
+            int(round(y1)),
+            color,
+            thickness=2 if selected else 1,
+        )
+        label = "SELECTED CANDIDATE" if selected else f"CANDIDATE {index + 1}"
+        draw_text(
+            pixels,
+            width,
+            int(round(min(x0, x1))) + 4,
+            int(round(min(y0, y1))) + 14 + index * 9,
+            label,
+            color,
+            scale=1,
+        )
+
+
+def _candidate_line_y(candidate: object) -> float | None:
+    value = _component_value(candidate, "measurement_line_y")
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _roi_local_line_endpoints(
+    roi: RotatedRoi,
+    measurement_line_y: float,
+) -> tuple[float, float, float, float]:
+    unit_x, unit_y = roi_measurement_direction(roi.angle_deg)
+    perp_x, perp_y = -unit_y, unit_x
+    x0 = roi.center_x - roi.width / 2.0 * unit_x + measurement_line_y * perp_x
+    y0 = roi.center_y - roi.width / 2.0 * unit_y + measurement_line_y * perp_y
+    x1 = roi.center_x + roi.width / 2.0 * unit_x + measurement_line_y * perp_x
+    y1 = roi.center_y + roi.width / 2.0 * unit_y + measurement_line_y * perp_y
+    return x0, y0, x1, y1
+
+
+def _draw_dashed_line(
+    pixels: bytearray,
+    width: int,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    color: tuple[int, int, int],
+    *,
+    thickness: int,
+    dash_px: float = 8.0,
+    gap_px: float = 5.0,
+) -> None:
+    total = math.hypot(x1 - x0, y1 - y0)
+    if total <= 0:
+        return
+    step = dash_px + gap_px
+    cursor = 0.0
+    while cursor < total:
+        end = min(total, cursor + dash_px)
+        start_ratio = cursor / total
+        end_ratio = end / total
+        draw_line(
+            pixels,
+            width,
+            int(round(x0 + (x1 - x0) * start_ratio)),
+            int(round(y0 + (y1 - y0) * start_ratio)),
+            int(round(x0 + (x1 - x0) * end_ratio)),
+            int(round(y0 + (y1 - y0) * end_ratio)),
+            color,
+            thickness=thickness,
+        )
+        cursor += step
 
 
 def _draw_interval_segments(

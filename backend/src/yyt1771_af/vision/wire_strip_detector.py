@@ -238,6 +238,9 @@ class WireStripDetector:
             max_internal_gap_px=(
                 bundle_internal_gap_px if params.enable_remote_interval_rejection else None
             ),
+            min_support_ratio=params.min_support_ratio,
+            span_tie_tolerance_px=params.span_tie_tolerance_px,
+            wire_likeness_score=wire_analysis.primary_wire_likeness_score,
             compute_debug_intervals=wants_full,
             timings_ms=selection_timings,
         )
@@ -253,6 +256,8 @@ class WireStripDetector:
             }
             | recipe_diagnostics
         )
+        if wants_full:
+            component_diagnostics |= _component_metrics_diagnostics(wire_analysis)
         if margins is not None:
             component_diagnostics |= {
                 "left_margin_px": margins.left_margin_px,
@@ -470,6 +475,28 @@ def _selection_diagnostics(selection: object, *, include_full: bool) -> dict[str
         "max_internal_gap_px": getattr(selection, "max_internal_gap_px", None),
         "bundle_outer_span_px": getattr(selection, "bundle_outer_span_px", None),
         "formal_ab_span_px": getattr(selection, "formal_ab_span_px", None),
+        "selected_line_rank": getattr(selection, "selected_line_rank", None),
+        "top_candidate_lines": getattr(selection, "top_candidate_lines", None),
+        "candidate_count": getattr(selection, "candidate_count", None),
+        "ambiguous_candidate_count": getattr(selection, "ambiguous_candidate_count", None),
+        "selected_line_span_px": getattr(selection, "selected_line_span_px", None),
+        "second_best_span_px": getattr(selection, "second_best_span_px", None),
+        "span_margin_to_second_best_px": getattr(
+            selection,
+            "span_margin_to_second_best_px",
+            None,
+        ),
+        "selected_line_support_ratio": getattr(selection, "selected_line_support_ratio", None),
+        "selected_line_max_internal_gap_px": getattr(
+            selection,
+            "selected_line_max_internal_gap_px",
+            None,
+        ),
+        "selected_line_interval_count": getattr(
+            selection,
+            "selected_line_interval_count",
+            None,
+        ),
         "candidate_line_is_debug_only": getattr(selection, "candidate_line_is_debug_only", None),
         "selected_line_reason": getattr(selection, "selected_line_reason", None),
         "measurement_mode": getattr(selection, "measurement_mode", None),
@@ -481,16 +508,16 @@ def _selection_diagnostics(selection: object, *, include_full: bool) -> dict[str
             "raw_intervals": getattr(selection, "raw_intervals", None),
             "bridged_intervals": getattr(selection, "bridged_intervals", None),
             "selected_valid_intervals": getattr(selection, "selected_valid_intervals", None),
-            "leftmost_valid_interval": getattr(selection, "leftmost_valid_interval", None),
-            "rightmost_valid_interval": getattr(selection, "rightmost_valid_interval", None),
-            "interval_gaps": getattr(selection, "interval_gaps", None),
-            "bundle_clusters": getattr(selection, "bundle_clusters", None),
             "rejected_remote_intervals": getattr(selection, "rejected_remote_intervals", None),
             "rejected_remote_interval_reasons": getattr(
                 selection,
                 "rejected_remote_interval_reasons",
                 None,
             ),
+            "leftmost_valid_interval": getattr(selection, "leftmost_valid_interval", None),
+            "rightmost_valid_interval": getattr(selection, "rightmost_valid_interval", None),
+            "interval_gaps": getattr(selection, "interval_gaps", None),
+            "bundle_clusters": getattr(selection, "bundle_clusters", None),
             "mesh_outer_span_px": getattr(selection, "mesh_outer_span_px", None),
             "virtual_envelope_span_px": getattr(selection, "virtual_envelope_span_px", None),
         }
@@ -500,12 +527,12 @@ def _selection_diagnostics(selection: object, *, include_full: bool) -> dict[str
             "raw_intervals": None,
             "bridged_intervals": None,
             "selected_valid_intervals": None,
+            "rejected_remote_intervals": None,
+            "rejected_remote_interval_reasons": None,
             "leftmost_valid_interval": None,
             "rightmost_valid_interval": None,
             "interval_gaps": None,
             "bundle_clusters": None,
-            "rejected_remote_intervals": None,
-            "rejected_remote_interval_reasons": None,
             "mesh_outer_span_px": None,
             "virtual_envelope_span_px": None,
         }
@@ -701,6 +728,30 @@ def _segmentation_diagnostics(segmentation_debug: object) -> dict[str, object]:
     }
 
 
+def _component_metrics_diagnostics(analysis: WireForegroundAnalysis) -> dict[str, object]:
+    components = [
+        {
+            "component_id": metric.component_id,
+            "area_px": metric.area_px,
+            "area_ratio_in_roi": metric.area_ratio_in_roi,
+            "bbox": metric.bbox,
+            "aspect_ratio": metric.aspect_ratio,
+            "orientation_deg": metric.orientation_deg,
+            "orientation_deviation_deg": metric.orientation_deviation_deg,
+            "local_contrast": metric.local_contrast,
+            "wire_likeness_score": metric.wire_likeness_score,
+            "accepted": metric.accepted,
+            "reject_reason": metric.reject_reason,
+        }
+        for metric in analysis.metrics
+    ]
+    return {
+        "wire_components": components,
+        "accepted_components": [item for item in components if item["accepted"]],
+        "rejected_components": [item for item in components if not item["accepted"]],
+    }
+
+
 def _contact_diagnostics(contact_debug: object) -> dict[str, object]:
     return {
         "contour_point_count": contact_debug.contour_point_count,
@@ -751,6 +802,16 @@ def _contact_diagnostics(contact_debug: object) -> dict[str, object]:
         "max_internal_gap_px": contact_debug.max_internal_gap_px,
         "bundle_outer_span_px": contact_debug.bundle_outer_span_px,
         "formal_ab_span_px": contact_debug.formal_ab_span_px,
+        "selected_line_rank": contact_debug.selected_line_rank,
+        "top_candidate_lines": contact_debug.top_candidate_lines,
+        "candidate_count": contact_debug.candidate_count,
+        "ambiguous_candidate_count": contact_debug.ambiguous_candidate_count,
+        "selected_line_span_px": contact_debug.selected_line_span_px,
+        "second_best_span_px": contact_debug.second_best_span_px,
+        "span_margin_to_second_best_px": contact_debug.span_margin_to_second_best_px,
+        "selected_line_support_ratio": contact_debug.selected_line_support_ratio,
+        "selected_line_max_internal_gap_px": contact_debug.selected_line_max_internal_gap_px,
+        "selected_line_interval_count": contact_debug.selected_line_interval_count,
         "virtual_envelope_span_px": contact_debug.virtual_envelope_span_px,
         "candidate_line_is_debug_only": contact_debug.candidate_line_is_debug_only,
         "selected_line_reason": contact_debug.selected_line_reason,
@@ -759,6 +820,10 @@ def _contact_diagnostics(contact_debug: object) -> dict[str, object]:
 
 
 def _failure_message(status: DetectionStatus, rejected_side: str | None) -> str | None:
+    if status is DetectionStatus.CALIPER_CONTACT_AMBIGUOUS:
+        return "ambiguous_measurement_line"
+    if status is DetectionStatus.QUALITY_BELOW_THRESHOLD:
+        return "candidate_line_quality_below_threshold"
     if status is DetectionStatus.CALIPER_CONTACT_ON_ROI_BOUNDARY:
         side_text = rejected_side or "unknown"
         return f"Detected contour contact is too close to the {side_text} ROI measurement boundary."

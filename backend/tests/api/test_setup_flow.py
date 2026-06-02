@@ -1,5 +1,9 @@
+import json
+import struct
+import zlib
 from pathlib import Path
 
+import numpy as np
 from fastapi.testclient import TestClient
 from yyt1771_af.main import app
 
@@ -32,6 +36,16 @@ def test_mock_camera_open_status_and_freeze_returns_acquisition_frame() -> None:
         "width": 320,
         "height": 220,
         "coordinate_space": "acquisition",
+    }
+    assert freeze_payload["frame_identity"] == {
+        "frame_id": status_payload["latest_frame_id"],
+        "frame_index": status_payload["latest_frame_id"] - 1,
+        "frame_name": f"mock_{status_payload['latest_frame_id']:06d}",
+        "source_type": "mock",
+        "acquisition_width": 320,
+        "acquisition_height": 220,
+        "recipe_summary": None,
+        "debug_level": None,
     }
 
 
@@ -71,6 +85,10 @@ def test_setup_detect_returns_backend_ab_points_for_balloon_recipe() -> None:
     assert 0.0 <= payload["quality"] <= 1.0
     assert "diagnostics" in payload
     assert payload["debug_overlay_url"].startswith("/api/setup/debug-overlay/")
+    assert payload["frame_identity"]["frame_id"] == frame_ref["frame_id"]
+    assert payload["frame_identity"]["source_type"] == "mock"
+    assert payload["frame_identity"]["recipe_summary"]["recipe_name"] == "balloon_envelope_default"
+    assert payload["frame_identity"]["debug_level"] == "full"
 
 
 def test_setup_detect_accepts_segmentation_override_and_serves_debug_overlay() -> None:
@@ -127,6 +145,148 @@ def test_setup_detect_accepts_segmentation_override_and_serves_debug_overlay() -
     assert overlay_response.status_code == 200
     assert overlay_response.headers["content-type"] == "image/png"
     assert overlay_response.content.startswith(b"\x89PNG")
+
+
+def test_setup_point_probe_explains_rejected_remote_speck(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    frame = _wire_bundle_with_remote_speck()
+    np.save(frames_dir / "frame_000001.npy", frame)
+    monkeypatch.setenv("YYT1771_AF_OFFLINE_DIR", str(frames_dir))
+    client = TestClient(app)
+    client.post("/api/camera/open", json={"profile": "dev_offline"})
+    freeze_payload = client.post("/api/setup/freeze", json={"source": "latest"}).json()
+    frame_ref = freeze_payload["frame_ref"]
+    recipe = _wire_remote_speck_recipe(frame_ref)
+
+    detect_response = client.post("/api/setup/detect", json=recipe)
+    assert detect_response.status_code == 200
+    detection = detect_response.json()
+    assert detection["valid"] is True
+    assert detection["frame_identity"]["frame_name"] == "frame_000001.npy"
+    assert detection["diagnostics"]["remote_interval_rejection_count"] >= 1
+
+    probe_response = client.post(
+        "/api/setup/probe-point",
+        json=recipe
+        | {
+            "x": 265.0,
+            "y": 110.0,
+            "coordinate_space": "acquisition",
+        },
+    )
+
+    assert probe_response.status_code == 200
+    probe = probe_response.json()
+    serialized = json.dumps(probe)
+    assert str(frames_dir) not in serialized
+    assert probe["frame_identity"]["frame_name"] == "frame_000001.npy"
+    assert probe["pixel_value"] == 30
+    assert probe["inside_roi"] is True
+    assert probe["raw_foreground"] is True
+    assert probe["morphology_foreground"] is True
+    assert probe["wire_foreground"] is True
+    assert probe["component_id"] is not None
+    assert probe["component_accepted"] is True
+    assert probe["component_reject_reason"] is None
+    assert probe["selected_valid_interval"] is False
+    assert probe["rejected_remote_interval"] is True
+    assert probe["reject_reason"] == "remote_gap_exceeded"
+    assert probe["would_be_ab_source"] is False
+
+
+def test_setup_point_probe_returns_false_null_for_background(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    np.save(frames_dir / "frame_000001.npy", _wire_bundle_with_remote_speck())
+    monkeypatch.setenv("YYT1771_AF_OFFLINE_DIR", str(frames_dir))
+    client = TestClient(app)
+    client.post("/api/camera/open", json={"profile": "dev_offline"})
+    frame_ref = client.post("/api/setup/freeze", json={"source": "latest"}).json()["frame_ref"]
+    recipe = _wire_remote_speck_recipe(frame_ref)
+
+    probe_response = client.post(
+        "/api/setup/probe-point",
+        json=recipe
+        | {
+            "x": 10.0,
+            "y": 10.0,
+            "coordinate_space": "acquisition",
+        },
+    )
+
+    assert probe_response.status_code == 200
+    probe = probe_response.json()
+    assert probe["pixel_value"] == 230
+    assert probe["inside_roi"] is False
+    assert probe["raw_foreground"] is False
+    assert probe["morphology_foreground"] is False
+    assert probe["wire_foreground"] is False
+    assert probe["component_id"] is None
+    assert probe["component_accepted"] is None
+    assert probe["component_reject_reason"] is None
+    assert probe["interval_id"] is None
+    assert probe["selected_valid_interval"] is False
+    assert probe["rejected_interval"] is False
+    assert probe["rejected_remote_interval"] is False
+    assert probe["would_be_ab_source"] is False
+
+
+def test_setup_roi_crop_zoom_preserves_one_pixel_speck(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    frame = np.full((64, 80), 230, dtype=np.uint8)
+    frame[32, 44] = 30
+    np.save(frames_dir / "frame_000001.npy", frame)
+    monkeypatch.setenv("YYT1771_AF_OFFLINE_DIR", str(frames_dir))
+    client = TestClient(app)
+    client.post("/api/camera/open", json={"profile": "dev_offline"})
+    frame_ref = client.post("/api/setup/freeze", json={"source": "latest"}).json()["frame_ref"]
+    detect_response = client.post(
+        "/api/setup/detect",
+        json={
+            "frame_ref": frame_ref,
+            "roi": {
+                "center_x": 40.0,
+                "center_y": 32.0,
+                "width": 24.0,
+                "height": 18.0,
+                "angle_deg": 0.0,
+                "coordinate_space": "acquisition",
+            },
+            "target_family": "wire_strip",
+            "recipe_name": "wire_strip_default",
+            "segmentation": {
+                "polarity": "dark_on_light",
+                "threshold_mode": "fixed",
+                "threshold_value": 100,
+                "blur_kernel": 3,
+                "close_kernel": 1,
+                "open_kernel": 1,
+                "min_component_area_px": 1,
+                "fill_internal_holes": False,
+            },
+        },
+    )
+    assert detect_response.status_code == 200
+    crop_url = detect_response.json()["roi_crop_url"]
+
+    crop_response = client.get(crop_url + "&scale=4")
+
+    assert crop_response.status_code == 200
+    width, height, pixels = _decode_rgb_png(crop_response.content)
+    assert (width, height) == (96, 72)
+    dark_pixels = int(np.count_nonzero(np.all(pixels < 80, axis=2)))
+    assert dark_pixels == 16
 
 
 def test_setup_detect_and_confirm_accept_complete_open_mesh_recipe_snapshot() -> None:
@@ -361,3 +521,95 @@ def test_offline_camera_open_reads_pgm_image_folder(
     assert status_payload["frame_width"] == 6
     assert status_payload["frame_height"] == 4
     assert status_payload["coordinate_space"] == "acquisition"
+
+
+def _wire_bundle_with_remote_speck() -> np.ndarray:
+    image = np.full((220, 320), 230, dtype=np.uint8)
+    image[50:170, 64:72] = 30
+    image[50:170, 98:108] = 30
+    image[50:170, 134:148] = 30
+    image[80:140, 262:268] = 30
+    return image
+
+
+def _wire_remote_speck_recipe(frame_ref: dict[str, object]) -> dict[str, object]:
+    return {
+        "frame_ref": frame_ref,
+        "roi": {
+            "center_x": 160.0,
+            "center_y": 110.0,
+            "width": 280.0,
+            "height": 150.0,
+            "angle_deg": 0.0,
+            "coordinate_space": "acquisition",
+        },
+        "target_family": "wire_strip",
+        "recipe_name": "wire_strip_default",
+        "segmentation": {
+            "polarity": "dark_on_light",
+            "threshold_mode": "fixed",
+            "threshold_value": 160,
+            "blur_kernel": 3,
+            "close_kernel": 1,
+            "open_kernel": 1,
+            "min_component_area_px": 20,
+            "fill_internal_holes": False,
+        },
+        "detector": {
+            "detector_kind": "wire_strip_detector",
+            "measurement_model": "blank_wire_bundle_envelope_blank",
+            "measurement_mode": "wire_bundle_envelope",
+            "min_quality": 0.6,
+            "max_point_jump_px": 20.0,
+            "reject_contact_on_roi_boundary": True,
+            "boundary_margin_px": 3.0,
+            "require_physical_endpoints": False,
+            "skeleton_endpoint_detection": False,
+            "preserve_visible_strip_contour": True,
+            "min_interval_width_px": 3.0,
+            "max_interval_width_ratio": 0.65,
+            "min_valid_interval_count": 2,
+            "min_local_contrast_score": 8.0,
+            "min_wire_likeness_score": 0.0,
+            "max_broad_blob_area_ratio": 0.22,
+            "max_component_area_ratio": 0.45,
+            "min_component_area_px": 40,
+            "max_internal_gap_px": None,
+            "max_internal_gap_ratio": 0.9,
+            "max_bundle_internal_gap_px": 60.0,
+            "max_bundle_internal_gap_ratio": 1.0,
+            "min_neighbor_line_support": 1,
+            "component_aspect_ratio_min": 1.8,
+            "broad_blob_max_aspect_ratio": 1.8,
+            "enable_broad_blob_rejection": True,
+            "enable_local_contrast_filter": True,
+            "enable_neighbor_line_support_filter": True,
+            "enable_remote_interval_rejection": True,
+            "enable_orientation_scoring": True,
+        },
+    }
+
+
+def _decode_rgb_png(payload: bytes) -> tuple[int, int, np.ndarray]:
+    assert payload.startswith(b"\x89PNG\r\n\x1a\n")
+    offset = 8
+    width = height = None
+    compressed = b""
+    while offset < len(payload):
+        chunk_length = struct.unpack(">I", payload[offset : offset + 4])[0]
+        chunk_type = payload[offset + 4 : offset + 8]
+        chunk_data = payload[offset + 8 : offset + 8 + chunk_length]
+        offset += 12 + chunk_length
+        if chunk_type == b"IHDR":
+            width, height = struct.unpack(">II", chunk_data[:8])
+        elif chunk_type == b"IDAT":
+            compressed += chunk_data
+        elif chunk_type == b"IEND":
+            break
+    assert width is not None
+    assert height is not None
+    raw = zlib.decompress(compressed)
+    rows = np.frombuffer(raw, dtype=np.uint8).reshape(height, width * 3 + 1)
+    assert np.all(rows[:, 0] == 0)
+    pixels = rows[:, 1:].reshape(height, width, 3)
+    return width, height, pixels

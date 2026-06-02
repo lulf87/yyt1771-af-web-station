@@ -25,13 +25,14 @@ from yyt1771_af.core.models import (
     DetectionDiagnostics,
     DetectionResult,
     DetectorParams,
+    Frame,
     Point2D,
     RotatedRoi,
     SegmentationParams,
     WireStripDetectorParams,
 )
 from yyt1771_af.core.path_redaction import safe_path_label, sanitize_path_metadata
-from yyt1771_af.core.statuses import DetectionStatus, DetectorKind, TargetFamily
+from yyt1771_af.core.statuses import CoordinateSpace, DetectionStatus, DetectorKind, TargetFamily
 from yyt1771_af.report.debug_overlay import render_debug_overlay_png
 from yyt1771_af.report.simple_png import (
     blank_rgb,
@@ -40,6 +41,7 @@ from yyt1771_af.report.simple_png import (
     draw_text,
     encode_png,
 )
+from yyt1771_af.services.frame_identity import frame_identity, recipe_summary
 from yyt1771_af.vision.detection import detect_target
 
 
@@ -443,6 +445,28 @@ def _evaluate_frame(
             segmentation=segmentation,
             params=params,
         )
+        identity = frame_identity(
+            frame=Frame(
+                frame_id=frame_index + 1,
+                timestamp_ms=0,
+                width=int(frame.shape[1]),
+                height=int(frame.shape[0]),
+                coordinate_space=CoordinateSpace.ACQUISITION,
+                image=frame,
+                frame_name=frame_path.name,
+                frame_index=frame_index,
+                dtype=str(frame.dtype),
+            ),
+            source_type="offline",
+            recipe=recipe_summary(
+                target_family=target_family,
+                recipe_name=None,
+                roi=roi,
+                segmentation=segmentation,
+                detector=params,
+            ),
+            debug_level="full",
+        )
     except (OSError, ValueError) as exc:
         processing_ms = (time.perf_counter() - start) * 1000.0
         result = DetectionResult(
@@ -458,6 +482,7 @@ def _evaluate_frame(
                 message=str(exc),
             ),
         )
+        identity = None
     else:
         processing_ms = (time.perf_counter() - start) * 1000.0
     reason = result.diagnostics.message or (
@@ -475,6 +500,7 @@ def _evaluate_frame(
         "quality": result.quality,
         "reason": reason,
         "diagnostics": result.diagnostics.model_dump(mode="json", exclude_none=True),
+        "frame_identity": identity.model_dump(mode="json") if identity is not None else None,
         "processing_ms": round(processing_ms, 6),
     }
 

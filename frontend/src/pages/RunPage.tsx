@@ -8,6 +8,7 @@ import {
   inspectOfflineRun,
   nextOfflineRun,
   openOfflineRun,
+  probeOfflineRunPoint,
   previousOfflineRun,
   seekOfflineRun,
   startRun,
@@ -20,6 +21,8 @@ import type {
   OfflineDataset,
   OfflineRunFrame,
   OfflineRunOpenResponse,
+  Point2D,
+  PointProbeResponse,
   RunSample,
   RunStatusResponse,
 } from "../api/types";
@@ -27,8 +30,13 @@ import { FrameCanvas } from "../components/FrameCanvas";
 import { OfflineDatasetSelector } from "../components/OfflineDatasetSelector";
 import { StatusPanel } from "../components/StatusPanel";
 import { TemperaturePanel } from "../components/TemperaturePanel";
+import { TemperatureDistanceChart } from "../components/TemperatureDistanceChart";
 import { latestSample, sampleRows } from "../run/sampleDisplay";
 import { formatPlaybackTime, runtimeNumber, runtimeString } from "../run/liveOfflineDisplay";
+import {
+  appendLiveTemperatureDistanceSample,
+  type TemperatureDistanceSample,
+} from "../run/temperatureDistanceSeries";
 
 interface RunPageProps {
   datasets: OfflineDataset[];
@@ -78,6 +86,13 @@ export function RunPage({
   const [liveLoop, setLiveLoop] = useState(true);
   const [isLivePlaying, setIsLivePlaying] = useState(false);
   const [liveFrameIntervalMs, setLiveFrameIntervalMs] = useState<number | null>(null);
+  const [rawOnly, setRawOnly] = useState(false);
+  const [probeMode, setProbeMode] = useState(false);
+  const [cropZoom, setCropZoom] = useState(2);
+  const [probeResult, setProbeResult] = useState<PointProbeResponse | null>(null);
+  const [temperatureDistanceSamples, setTemperatureDistanceSamples] = useState<
+    TemperatureDistanceSample[]
+  >([]);
   const inFlightLiveRequest = useRef(false);
   const liveTimer = useRef<number | null>(null);
   const liveSessionIdRef = useRef<string | null>(null);
@@ -105,12 +120,11 @@ export function RunPage({
     runMode === "live_offline" ? (liveFrame?.detection ?? null) : (latest?.detection ?? null);
   const activeFrameRef = runMode === "live_offline" ? liveFrameRef : latestFrameRef;
   const activePreviewUrl = runMode === "live_offline" ? liveFrame?.preview_url ?? null : latestPreviewUrl;
+  const liveRoiCropUrl =
+    runMode === "live_offline" && offlineRun !== null && liveFrame !== null
+      ? `/api/offline-run/${offlineRun.session_id}/frame/${liveFrame.frame_index}/roi-crop.png?scale=${cropZoom}`
+      : null;
   const rows = sampleRows(samples).slice(-12).reverse();
-  const chartSamples = samples.slice(-24);
-  const maxDistance = Math.max(
-    1,
-    ...chartSamples.map((sample) => sample.detection.distance_px ?? 0),
-  );
   const liveRelativeTimeS =
     runMode === "live_offline" ? (liveFrame?.relative_time_s ?? null) : null;
   const liveTotalDurationS =
@@ -130,8 +144,6 @@ export function RunPage({
     runMode === "live_offline"
       ? runtimeString(liveFrame?.runtime, "temperature_source")
       : null;
-  const activeTemperatureC =
-    runMode === "live_offline" ? liveTemperatureC : (latest?.temperature_c ?? null);
   const liveState =
     liveApiError !== null && offlineRun !== null
       ? "api_error"
@@ -168,12 +180,21 @@ export function RunPage({
     };
   }, []);
 
-  function markLiveFrameSuccess(frame: OfflineRunFrame) {
+  function markLiveFrameSuccess(
+    frame: OfflineRunFrame,
+    { appendToTemperatureDistanceChart = false }: { appendToTemperatureDistanceChart?: boolean } = {},
+  ) {
     setLiveFrame(frame);
     setLiveApiError(null);
     setLivePreviewError(null);
+    setProbeResult(null);
     setLastSuccessfulLiveFrameIndex(frame.frame_index);
     setFailedLiveFrameIndex(null);
+    setTemperatureDistanceSamples((currentSamples) =>
+      appendLiveTemperatureDistanceSample(currentSamples, frame, {
+        fromPlaybackLoop: appendToTemperatureDistanceChart,
+      }),
+    );
   }
 
   function liveErrorFromCaught(caughtError: unknown, fallback: string): LiveRunErrorInfo {
@@ -279,6 +300,8 @@ export function RunPage({
       setLivePreviewError(null);
       setLastSuccessfulLiveFrameIndex(null);
       setFailedLiveFrameIndex(null);
+    setTemperatureDistanceSamples([]);
+      setProbeResult(null);
       const firstFrame = await seekOfflineRun(opened.session_id, opened.current_frame_index);
       markLiveFrameSuccess(firstFrame);
     });
@@ -306,6 +329,7 @@ export function RunPage({
     setLivePreviewError(null);
     setLastSuccessfulLiveFrameIndex(null);
     setFailedLiveFrameIndex(null);
+    setProbeResult(null);
     liveSessionIdRef.current = null;
   }
 
@@ -380,6 +404,28 @@ export function RunPage({
     });
   }
 
+  async function handleProbePoint(point: Point2D) {
+    if (offlineRun === null || liveFrame === null) {
+      setError("Open Live Offline Run and load a frame first.");
+      return;
+    }
+    if (measurementDefinition?.target_family !== "wire_strip") {
+      setError("Point probe is available for wire_strip runs.");
+      return;
+    }
+    await runAction("live-probe", async () => {
+      setIsLivePlaying(false);
+      liveNextAbortControllerRef.current?.abort();
+      const result = await probeOfflineRunPoint(offlineRun.session_id, {
+        frame_index: liveFrame.frame_index,
+        x: point.x,
+        y: point.y,
+        coordinate_space: "acquisition",
+      });
+      setProbeResult(result);
+    });
+  }
+
   async function advanceLiveNext({
     fromPlaybackLoop,
   }: {
@@ -397,7 +443,7 @@ export function RunPage({
     liveNextAbortControllerRef.current = abortController;
     try {
       const frame = await nextOfflineRun(offlineRun.session_id, abortController.signal);
-      markLiveFrameSuccess(frame);
+      markLiveFrameSuccess(frame, { appendToTemperatureDistanceChart: fromPlaybackLoop });
       if (frame.end_of_stream) {
         setIsLivePlaying(false);
       }
@@ -505,67 +551,6 @@ export function RunPage({
 
       <section className="run-grid" aria-label="Run workspace">
         <section className="run-main" aria-label="Run frame and samples">
-          <section className="run-summary">
-            <div className="summary-tile">
-              <span>Distance</span>
-              <strong>
-                {activeDetection?.distance_px === null || !activeDetection
-                  ? "-"
-                  : activeDetection.distance_px.toFixed(2)}
-              </strong>
-            </div>
-            <div className="summary-tile">
-              <span>Status</span>
-              <strong>{activeDetection?.status ?? "waiting"}</strong>
-            </div>
-            <div className="summary-tile">
-              <span>Quality</span>
-              <strong>{activeDetection ? activeDetection.quality.toFixed(2) : "-"}</strong>
-            </div>
-            {runMode === "live_offline" ? (
-              <div className="summary-tile">
-                <span>Material time</span>
-                <strong>
-                  {liveRelativeTimeS === null || liveTotalDurationS === null
-                    ? "-"
-                    : `${formatPlaybackTime(liveRelativeTimeS)} / ${formatPlaybackTime(liveTotalDurationS)}`}
-                </strong>
-              </div>
-            ) : (
-              <div className="summary-tile">
-                <span>Temperature</span>
-                <strong>
-                  {activeTemperatureC === null ? "-" : activeTemperatureC.toFixed(1)}
-                </strong>
-              </div>
-            )}
-            {runMode === "live_offline" ? (
-              <div className="summary-tile">
-                <span>Temperature</span>
-                <strong>
-                  {activeTemperatureC === null
-                    ? "-"
-                    : `${activeTemperatureC.toFixed(1)}°C${liveTemperatureStatus ? ` (${liveTemperatureStatus})` : ""}${liveTemperatureSource ? ` · ${liveTemperatureSource}` : ""}`}
-                </strong>
-              </div>
-            ) : null}
-
-            <div className="run-chart" aria-label="Recent distance samples">
-              {chartSamples.map((sample) => {
-                const distance = sample.detection.distance_px;
-                const height = distance === null ? 8 : Math.max(8, (distance / maxDistance) * 130);
-                return (
-                  <div
-                    className={distance === null ? "bar invalid" : "bar"}
-                    key={sample.sample_index}
-                    style={{ height }}
-                    title={`${sample.sample_index}: ${sample.detection.status}, ${sample.temperature_status}`}
-                  />
-                );
-              })}
-            </div>
-          </section>
-
           <section className="frame-stage compact-frame" aria-label="Latest run frame">
             <FrameCanvas
               detection={activeDetection}
@@ -577,11 +562,25 @@ export function RunPage({
               frameRef={activeFrameRef}
               onPreviewError={runMode === "live_offline" ? handlePreviewError : undefined}
               onPreviewLoad={runMode === "live_offline" ? handlePreviewLoad : undefined}
+              onProbePoint={handleProbePoint}
               previewUrl={activePreviewUrl}
+              probeMode={runMode === "live_offline" && probeMode}
+              rawOnly={runMode === "live_offline" && rawOnly}
               roi={measurementDefinition?.roi ?? fallbackRoi}
               showDiagnosticsOverlay={runMode === "live_offline" && !isLivePlaying}
             />
+            {liveRoiCropUrl ? (
+              <section className="roi-crop-panel" aria-label="Live ROI crop inspect">
+                <h2>ROI crop inspect</h2>
+                <img alt="Full resolution live ROI crop" src={liveRoiCropUrl} />
+              </section>
+            ) : null}
           </section>
+
+          <TemperatureDistanceChart
+            onClear={() => setTemperatureDistanceSamples([])}
+            samples={temperatureDistanceSamples}
+          />
         </section>
 
         <aside className="setup-panel" aria-label="Run controls">
@@ -663,7 +662,46 @@ export function RunPage({
 
           {runMode === "live_offline" ? (
             <section className="panel-section">
-              <h2>Diagnostics</h2>
+              <h2>Inspect</h2>
+              <div className="inspect-controls">
+                <label className="inline-check">
+                  <input
+                    checked={rawOnly}
+                    onChange={(event) => setRawOnly(event.currentTarget.checked)}
+                    type="checkbox"
+                  />
+                  <span>Raw only</span>
+                </label>
+                <button
+                  aria-pressed={probeMode}
+                  className={probeMode ? "active" : undefined}
+                  disabled={liveFrame === null || isBusy}
+                  onClick={() => setProbeMode((enabled) => !enabled)}
+                  type="button"
+                >
+                  Probe point
+                </button>
+                <label className="stacked-field">
+                  <span>ROI crop zoom</span>
+                  <select
+                    disabled={liveFrame === null}
+                    onChange={(event) => setCropZoom(Number(event.currentTarget.value))}
+                    value={cropZoom}
+                  >
+                    <option value={1}>1x</option>
+                    <option value={2}>2x</option>
+                    <option value={4}>4x</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+          ) : null}
+
+          {runMode === "live_offline" ? (
+            <details className="panel-section collapsible-section">
+              <summary>
+                <h2>Diagnostics</h2>
+              </summary>
               <LiveTimingReadout
                 runtime={liveFrame?.runtime}
                 frameIntervalMs={isLivePlaying ? liveFrameIntervalMs : null}
@@ -672,9 +710,10 @@ export function RunPage({
                 cameraStatus={liveCameraStatus}
                 detection={activeDetection}
                 error={liveControlError}
+                probeResult={probeResult}
                 showDebugDiagnostics={!isLivePlaying}
               />
-            </section>
+            </details>
           ) : null}
         </aside>
       </section>
@@ -1021,8 +1060,10 @@ function LiveOfflineRunControls({
         </label>
       </section>
 
-      <section className="panel-section">
-        <h2>Live Status</h2>
+      <details className="panel-section collapsible-section">
+        <summary>
+          <h2>Live Status</h2>
+        </summary>
         <dl className="metric-list">
           <div>
             <dt>State</dt>
@@ -1089,7 +1130,7 @@ function LiveOfflineRunControls({
             </div>
           ) : null}
         </dl>
-      </section>
+      </details>
     </>
   );
 }

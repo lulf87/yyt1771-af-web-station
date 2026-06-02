@@ -14,8 +14,10 @@ import type {
   OfflineRunErrorResponse,
   OfflineRunOpenRequest,
   OfflineRunOpenResponse,
+  OfflineRunPointProbeRequest,
   OfflineRunStatus,
   OfflineRunTraceResponse,
+  PointProbeResponse,
   RunListResponse,
   RunSamplesResponse,
   RunStartRequest,
@@ -26,6 +28,7 @@ import type {
   SetupConfirmResponse,
   SetupDetectRequest,
   SetupDetectResponse,
+  SetupPointProbeRequest,
   WireAutoTuneRequest,
   WireAutoTuneResponse,
   TemperatureCommandResponse,
@@ -103,6 +106,15 @@ export async function detectSetupFrame(
   request: SetupDetectRequest,
 ): Promise<SetupDetectResponse> {
   return requestJson<SetupDetectResponse>("/api/setup/detect", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function probeSetupPoint(
+  request: SetupPointProbeRequest,
+): Promise<PointProbeResponse> {
+  return requestJson<PointProbeResponse>("/api/setup/probe-point", {
     method: "POST",
     body: JSON.stringify(request),
   });
@@ -225,6 +237,16 @@ export async function seekOfflineRun(
   return requestJson<OfflineRunFrame>(`/api/offline-run/${sessionId}/seek`, {
     method: "POST",
     body: JSON.stringify({ frame_index: frameIndex }),
+  });
+}
+
+export async function probeOfflineRunPoint(
+  sessionId: string,
+  request: OfflineRunPointProbeRequest,
+): Promise<PointProbeResponse> {
+  return requestJson<PointProbeResponse>(`/api/offline-run/${sessionId}/probe-point`, {
+    method: "POST",
+    body: JSON.stringify(request),
   });
 }
 

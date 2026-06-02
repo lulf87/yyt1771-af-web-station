@@ -2,6 +2,8 @@ import type { Point2D, RotatedRoi } from "../api/types";
 
 export type RoiHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
+const ROTATION_HANDLE_OFFSET_PX = 32;
+
 export interface FrameSize {
   width: number;
   height: number;
@@ -172,6 +174,15 @@ export function roiHandlePoints(roi: RotatedRoi): Record<RoiHandle, Point2D> {
   ) as Record<RoiHandle, Point2D>;
 }
 
+export function roiRotationHandlePoint(roi: RotatedRoi): Point2D {
+  const vector = fromLocalVector(roi.angle_deg, 0, -roi.height / 2 - ROTATION_HANDLE_OFFSET_PX);
+  return {
+    x: roi.center_x + vector.x,
+    y: roi.center_y + vector.y,
+    coordinate_space: "acquisition",
+  };
+}
+
 export function hitTestRoiHandle(
   roi: RotatedRoi,
   point: Point2D,
@@ -185,6 +196,28 @@ export function hitTestRoiHandle(
     }
   }
   return null;
+}
+
+export function hitTestRoiRotationHandle(
+  roi: RotatedRoi,
+  point: Point2D,
+  tolerancePx: number,
+): boolean {
+  return distance(point, roiRotationHandlePoint(roi)) <= tolerancePx;
+}
+
+export function rotateRoiFromPointer(
+  roi: RotatedRoi,
+  pointer: Point2D,
+  _frame: FrameSize,
+): RotatedRoi {
+  const pointerAngleDeg =
+    (Math.atan2(pointer.y - roi.center_y, pointer.x - roi.center_x) * 180) / Math.PI;
+  return {
+    ...roi,
+    angle_deg: normalizeAngle(pointerAngleDeg + 90),
+    coordinate_space: "acquisition",
+  };
 }
 
 export function pointInsideRoi(roi: RotatedRoi, point: Point2D): boolean {
@@ -227,6 +260,11 @@ function fromLocalVector(angleDeg: number, x: number, y: number): { x: number; y
 
 function distance(a: Point2D, b: Point2D): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function normalizeAngle(angleDeg: number): number {
+  const normalized = ((((angleDeg + 180) % 360) + 360) % 360) - 180;
+  return Object.is(normalized, -0) ? 0 : Math.round(normalized * 1000) / 1000;
 }
 
 function clamp(value: number, min: number, max: number): number {

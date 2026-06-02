@@ -7,6 +7,7 @@ import {
   moveRoiByDelta,
   pointToOverlayCircle,
   resizeRoiFromHandle,
+  rotateRoiFromPointer,
   roiHandlePoints,
   roiToOverlayRect,
 } from "./transforms";
@@ -105,5 +106,28 @@ describe("setup overlay transforms", () => {
     expect(resized.width).toBe(110);
     expect(resized.height).toBe(40);
     expect(resized.coordinate_space).toBe("acquisition");
+  });
+
+  it("rotates ROI from a pointer around its acquisition center", () => {
+    const roi: RotatedRoi = {
+      center_x: 100,
+      center_y: 100,
+      width: 80,
+      height: 40,
+      angle_deg: 0,
+      coordinate_space: "acquisition",
+    };
+
+    const rotated = rotateRoiFromPointer(
+      roi,
+      { x: 160, y: 100, coordinate_space: "acquisition" },
+      { width: 320, height: 220 },
+    );
+
+    expect(rotated).toEqual({
+      ...roi,
+      angle_deg: 90,
+      coordinate_space: "acquisition",
+    });
   });
 });

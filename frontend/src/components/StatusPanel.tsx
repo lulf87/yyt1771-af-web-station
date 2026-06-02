@@ -1,4 +1,9 @@
-import type { CameraStatus, SetupDetectResponse } from "../api/types";
+import type {
+  CameraStatus,
+  FrameIdentity,
+  PointProbeResponse,
+  SetupDetectResponse,
+} from "../api/types";
 import { detectionReason, formatNullableNumber, formatPoint } from "./statusDisplay";
 
 interface StatusPanelProps {
@@ -6,6 +11,8 @@ interface StatusPanelProps {
   detection: SetupDetectResponse | null;
   error: string | null;
   showDebugDiagnostics?: boolean;
+  probeResult?: PointProbeResponse | null;
+  frameIdentity?: FrameIdentity | null;
 }
 
 export function StatusPanel({
@@ -13,7 +20,10 @@ export function StatusPanel({
   detection,
   error,
   showDebugDiagnostics = true,
+  probeResult = null,
+  frameIdentity = null,
 }: StatusPanelProps) {
+  const identity = detection?.frame_identity ?? frameIdentity;
   return (
     <>
       <dl className="metric-list">
@@ -57,6 +67,36 @@ export function StatusPanel({
           <dt>Reason</dt>
           <dd>{detectionReason(detection)}</dd>
         </div>
+        {identity ? (
+          <>
+            <div>
+              <dt>Frame identity</dt>
+              <dd>{identity.frame_name ?? valueText(identity.frame_index ?? identity.frame_id)}</dd>
+            </div>
+            <div>
+              <dt>Frame index</dt>
+              <dd>{valueText(identity.frame_index)}</dd>
+            </div>
+            <div>
+              <dt>Frame source</dt>
+              <dd>{identity.source_type}</dd>
+            </div>
+            <div>
+              <dt>Frame size</dt>
+              <dd>
+                {identity.acquisition_width} x {identity.acquisition_height}
+              </dd>
+            </div>
+            <div>
+              <dt>Debug level</dt>
+              <dd>{identity.debug_level ?? "N/A"}</dd>
+            </div>
+            <div>
+              <dt>Recipe summary</dt>
+              <dd>{recipeSummaryText(identity.recipe_summary)}</dd>
+            </div>
+          </>
+        ) : null}
         {error ? (
           <div className="metric-error">
             <dt>Error</dt>
@@ -64,8 +104,46 @@ export function StatusPanel({
           </div>
         ) : null}
       </dl>
+      {probeResult ? <PointProbeReadout probe={probeResult} /> : null}
       {detection && showDebugDiagnostics ? <DebugDiagnostics detection={detection} /> : null}
     </>
+  );
+}
+
+function PointProbeReadout({ probe }: { probe: PointProbeResponse }) {
+  const rows: Array<[string, string]> = [
+    ["Frame", probe.frame_identity.frame_name ?? valueText(probe.frame_identity.frame_index)],
+    ["Probe x,y", `${valueText(probe.x)}, ${valueText(probe.y)}`],
+    ["Pixel value", valueText(probe.pixel_value)],
+    ["Inside ROI", valueText(probe.inside_roi)],
+    ["Raw foreground", valueText(probe.raw_foreground)],
+    ["Morphology foreground", valueText(probe.morphology_foreground)],
+    ["Wire foreground", valueText(probe.wire_foreground)],
+    ["Component id", valueText(probe.component_id)],
+    ["Component accepted", valueText(probe.component_accepted)],
+    ["Component reject reason", valueText(probe.component_reject_reason)],
+    ["Interval id", valueText(probe.interval_id)],
+    ["Selected valid interval", valueText(probe.selected_valid_interval)],
+    ["Rejected interval", valueText(probe.rejected_interval)],
+    ["Rejected remote interval", valueText(probe.rejected_remote_interval)],
+    ["Reject reason", valueText(probe.reject_reason)],
+    ["A/B source interval", valueText(probe.source_interval_id)],
+    ["Would be A/B source", valueText(probe.would_be_ab_source)],
+  ];
+  return (
+    <details className="debug-diagnostics collapsible-section" open>
+      <summary>
+        <h3>Point Probe</h3>
+      </summary>
+      <dl className="metric-list debug-list">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }
 
@@ -159,6 +237,16 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
     ["Line max internal gap", valueText(diagnostics.max_internal_gap_px)],
     ["Bundle outer span", valueText(diagnostics.bundle_outer_span_px ?? diagnostics.mesh_outer_span_px)],
     ["Formal A/B span", valueText(diagnostics.formal_ab_span_px)],
+    ["Selected line rank", valueText(diagnostics.selected_line_rank)],
+    ["Selected line span", valueText(diagnostics.selected_line_span_px)],
+    ["Second best span", valueText(diagnostics.second_best_span_px)],
+    ["Span margin to second", valueText(diagnostics.span_margin_to_second_best_px)],
+    ["Selected line support", valueText(diagnostics.selected_line_support_ratio)],
+    ["Selected line max gap", valueText(diagnostics.selected_line_max_internal_gap_px)],
+    ["Selected line intervals", valueText(diagnostics.selected_line_interval_count)],
+    ["Candidate count", valueText(diagnostics.candidate_count)],
+    ["Ambiguous candidates", valueText(diagnostics.ambiguous_candidate_count)],
+    ["Top candidate lines", candidateLineSummary(diagnostics.top_candidate_lines)],
     ["Virtual envelope span", valueText(diagnostics.virtual_envelope_span_px)],
     ["Candidate line debug-only", valueText(diagnostics.candidate_line_is_debug_only)],
     ["Selected line reason", valueText(diagnostics.selected_line_reason)],
@@ -186,8 +274,10 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
   ];
 
   return (
-    <section className="debug-diagnostics" aria-label="Debug Diagnostics">
-      <h3>Debug Diagnostics</h3>
+    <details className="debug-diagnostics collapsible-section" aria-label="Debug Diagnostics">
+      <summary>
+        <h3>Debug Diagnostics</h3>
+      </summary>
       {detection.status === "caliper_contact_on_roi_boundary" ? (
         <p className="debug-warning">
           检测到的候选轮廓接触点距离 ROI 边界太近，可能是 ROI 裁剪边界而不是真实目标轮廓。请查看
@@ -202,7 +292,7 @@ function DebugDiagnostics({ detection }: { detection: SetupDetectResponse }) {
           </div>
         ))}
       </dl>
-    </section>
+    </details>
   );
 }
 
@@ -217,6 +307,19 @@ function valueText(value: unknown): string {
     return value ? "true" : "false";
   }
   return "N/A";
+}
+
+function recipeSummaryText(value: unknown): string {
+  if (typeof value !== "object" || value === null) {
+    return "N/A";
+  }
+  const summary = value as Record<string, unknown>;
+  const target = valueText(summary.target_family);
+  const recipe = valueText(summary.recipe_name);
+  const thresholdMode = valueText(summary.threshold_mode);
+  const threshold = valueText(summary.threshold_value);
+  const detector = valueText(summary.detector_kind);
+  return `${target} / ${recipe} / ${detector} / ${thresholdMode}:${threshold}`;
 }
 
 function bboxText(value: unknown): string {
@@ -281,4 +384,26 @@ function intervalSummary(value: unknown): string {
       return "N/A";
     })
     .join(", ");
+}
+
+function candidateLineSummary(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) {
+    return "N/A";
+  }
+  return value
+    .map((item) => {
+      if (typeof item !== "object" || item === null) {
+        return "N/A";
+      }
+      const candidate = item as Record<string, unknown>;
+      const selected = candidate.selected === true ? " selected" : "";
+      const rejected =
+        typeof candidate.rejected_reason === "string" ? ` rejected=${candidate.rejected_reason}` : "";
+      return `y=${valueText(candidate.measurement_line_y)} span=${valueText(
+        candidate.formal_ab_span_px,
+      )} support=${valueText(candidate.support_ratio)} gap=${valueText(
+        candidate.max_internal_gap_px,
+      )}${selected}${rejected}`;
+    })
+    .join("; ");
 }

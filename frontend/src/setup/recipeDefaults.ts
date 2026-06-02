@@ -109,6 +109,8 @@ export function recipeDefaultsForTarget(targetFamily: TargetFamily): SetupRecipe
       max_bundle_internal_gap_px: 60,
       max_bundle_internal_gap_ratio: 1,
       min_neighbor_line_support: 1,
+      min_support_ratio: 0.08,
+      span_tie_tolerance_px: 2,
       component_aspect_ratio_min: 1.8,
       broad_blob_max_aspect_ratio: 1.8,
       enable_broad_blob_rejection: true,
