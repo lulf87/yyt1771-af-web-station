@@ -32,7 +32,7 @@ describe("SetupPage collapsed panels", () => {
     expect(markup).toContain("Angle");
   });
 
-  it("exposes raw-only crop zoom and point probe controls", () => {
+  it("exposes raw-only and point probe controls without setup crop enlargement", () => {
     const markup = renderToStaticMarkup(
       <SetupPage
         datasets={[]}
@@ -44,6 +44,7 @@ describe("SetupPage collapsed panels", () => {
 
     expect(markup).toContain("Raw only");
     expect(markup).toContain("Probe point");
-    expect(markup).toContain("ROI crop zoom");
+    expect(markup).not.toContain("ROI crop zoom");
+    expect(markup).not.toContain("ROI crop inspect");
   });
 });

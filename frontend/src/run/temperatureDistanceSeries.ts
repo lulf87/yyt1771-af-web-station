@@ -49,6 +49,7 @@ interface TemperatureDistanceBinOptions {
 }
 
 const MIN_DOMAIN_SPAN = 1;
+const MIN_DISTANCE_TIME_Y_DOMAIN_SPAN = 10;
 const DOMAIN_MARGIN_RATIO = 0.08;
 const DEFAULT_TEMPERATURE_BIN_SIZE_C = 0.1;
 
@@ -213,7 +214,10 @@ export function distanceTimeDomains(samples: TemperatureDistanceSample[]): Tempe
       min: Math.max(0, x.min),
       max: Math.max(x.max, Math.max(0, x.min) + MIN_DOMAIN_SPAN),
     },
-    y: paddedDomain(points.map((point) => point.distancePx)),
+    y: paddedDomain(
+      points.map((point) => point.distancePx),
+      MIN_DISTANCE_TIME_Y_DOMAIN_SPAN,
+    ),
   };
 }
 
@@ -243,15 +247,15 @@ export function distanceTimeXValue(sample: TemperatureDistanceSample): number {
   return Number.isFinite(sample.relativeTimeS) ? sample.relativeTimeS : sample.frameIndex;
 }
 
-function paddedDomain(values: number[]): ChartDomain {
+function paddedDomain(values: number[], minimumSpan = MIN_DOMAIN_SPAN): ChartDomain {
   if (values.length === 0) {
-    return { min: 0, max: MIN_DOMAIN_SPAN };
+    return { min: 0, max: minimumSpan };
   }
 
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
   const center = (minValue + maxValue) / 2;
-  const span = Math.max(maxValue - minValue, MIN_DOMAIN_SPAN);
+  const span = Math.max(maxValue - minValue, minimumSpan);
   const paddedSpan = span * (1 + DOMAIN_MARGIN_RATIO * 2);
   return {
     min: center - paddedSpan / 2,

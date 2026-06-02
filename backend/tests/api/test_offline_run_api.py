@@ -25,7 +25,7 @@ def _png_size(payload: bytes) -> tuple[int, int]:
     return struct.unpack(">II", payload[16:24])
 
 
-def _confirm_definition(client: TestClient) -> str:
+def _confirm_definition(client: TestClient, *, max_point_jump_px: float = 25.0) -> str:
     client.post("/api/camera/open", json={"profile": "dev_mock"})
     response = client.post(
         "/api/setup/confirm",
@@ -57,7 +57,7 @@ def _confirm_definition(client: TestClient) -> str:
                 "contact_source": "filled_envelope",
                 "measurement_model": "blank_object_blank",
                 "min_quality": 0.65,
-                "max_point_jump_px": 25.0,
+                "max_point_jump_px": max_point_jump_px,
                 "reject_contact_on_roi_boundary": True,
                 "boundary_margin_px": 4.0,
                 "ignore_internal_texture": True,
@@ -155,6 +155,59 @@ def test_offline_run_next_seek_previous_loop_and_preview_are_session_scoped(
     assert preview.status_code == 200
     assert preview.headers["content-type"] == "image/png"
     assert _png_size(preview.content) == (160, 110)
+
+
+def test_offline_run_marks_excessive_point_jump_invalid(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    _write_frame(frames_dir / "frame_1.npy")
+    _write_frame(frames_dir / "frame_2.npy", x_offset=20)
+    client = TestClient(app)
+    measurement_definition_id = _confirm_definition(client, max_point_jump_px=10.0)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+
+    first = client.post(f"/api/offline-run/{session_id}/next").json()
+    second = client.post(f"/api/offline-run/{session_id}/next").json()
+
+    assert first["detection"]["status"] == "ok"
+    assert first["detection"]["valid"] is True
+    assert second["detection"]["status"] == "jump_exceeds_limit"
+    assert second["detection"]["valid"] is False
+    assert second["detection"]["point_a"] is None
+    assert second["detection"]["point_b"] is None
+    assert second["detection"]["distance_px"] is None
+    assert second["detection"]["diagnostics"]["rejected_candidate_point_a"] is not None
+    assert second["detection"]["diagnostics"]["is_top_jump_candidate"] is True
+
+
+def test_offline_run_seek_resets_previous_jump_baseline(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    _write_frame(frames_dir / "frame_1.npy")
+    _write_frame(frames_dir / "frame_2.npy", x_offset=20)
+    client = TestClient(app)
+    measurement_definition_id = _confirm_definition(client, max_point_jump_px=10.0)
+    opened = _open_live_run(
+        client,
+        frames_dir=frames_dir,
+        measurement_definition_id=measurement_definition_id,
+    )
+    session_id = opened["session_id"]
+
+    first = client.post(f"/api/offline-run/{session_id}/next").json()
+    seek = client.post(f"/api/offline-run/{session_id}/seek", json={"frame_index": 1}).json()
+
+    assert first["detection"]["status"] == "ok"
+    assert seek["frame_index"] == 1
+    assert seek["detection"]["status"] == "ok"
+    assert seek["detection"]["valid"] is True
+    assert seek["detection"]["point_a"] is not None
+    assert seek["detection"]["diagnostics"].get("previous_measurement_line_y") is None
 
 
 def test_offline_run_loop_false_returns_end_of_stream(tmp_path: Path) -> None:
@@ -808,7 +861,11 @@ def test_offline_run_trace_records_success_and_error_frames(tmp_path: Path) -> N
     assert traces[0]["selected_bundle_max_internal_gap_px"] is not None
     assert traces[0]["selected_line_y"] is not None
     assert traces[0]["selected_line_span_px"] is not None
-    assert traces[0]["selected_line_reason"] == "max_formal_ab_span"
+    assert traces[0]["selected_line_reason"] in {
+        "max_formal_ab_span",
+        "span_tie_break_support_ratio",
+        "stable_bundle_plateau",
+    }
     assert traces[0]["span_margin_to_second_best_px"] is not None
     assert traces[0]["top_candidate_lines"]
     assert traces[0]["top_candidate_lines"][0]["formal_ab_span_px"] is not None

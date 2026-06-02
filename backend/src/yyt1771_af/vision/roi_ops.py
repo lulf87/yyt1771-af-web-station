@@ -343,6 +343,17 @@ class _CandidateSelection:
     ambiguous: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class _SpanPlateau:
+    max_span_px: float
+    median_span_px: float
+    candidates: list[_LineCandidate]
+    median_support_ratio: float
+    line_count: int
+    median_y: float
+    score: float
+
+
 def rotated_roi_mask(shape: tuple[int, int], roi: RotatedRoi) -> np.ndarray:
     height, width = shape
     y, x = np.indices((height, width))
@@ -1772,6 +1783,145 @@ def _candidate_tie_key(candidate: _LineCandidate) -> tuple[float, float, int, fl
     )
 
 
+def _stable_plateau_span_window_px(
+    top_span_px: float,
+    *,
+    span_tie_tolerance_px: float,
+) -> float:
+    return max(span_tie_tolerance_px, min(32.0, top_span_px * 0.20))
+
+
+def _stable_plateau_override_min_drop_px(span_tie_tolerance_px: float) -> float:
+    return max(24.0, span_tie_tolerance_px * 8.0)
+
+
+def _stable_plateau_near_equal_drop_px(span_tie_tolerance_px: float) -> float:
+    return max(4.0, span_tie_tolerance_px * 2.0)
+
+
+def _candidate_line_gap_tolerance_px(candidates: list[_LineCandidate]) -> float:
+    line_y_values = sorted({candidate.measurement_line_y for candidate in candidates})
+    gaps = [b - a for a, b in zip(line_y_values, line_y_values[1:], strict=False) if b - a > 1e-6]
+    if not gaps:
+        return 1.5
+    return max(1.5, min(gaps) * 1.5)
+
+
+def _span_plateaus(
+    candidates: list[_LineCandidate],
+    *,
+    span_tie_tolerance_px: float,
+) -> list[_SpanPlateau]:
+    if not candidates:
+        return []
+    sorted_candidates = sorted(candidates, key=lambda candidate: candidate.measurement_line_y)
+    line_gap_tolerance = _candidate_line_gap_tolerance_px(sorted_candidates)
+    span_group_tolerance = max(1.0, span_tie_tolerance_px)
+    grouped: list[list[_LineCandidate]] = []
+    current_group: list[_LineCandidate] = []
+    for candidate in sorted_candidates:
+        if not current_group:
+            current_group = [candidate]
+            continue
+        previous = current_group[-1]
+        line_gap = candidate.measurement_line_y - previous.measurement_line_y
+        span_gap = abs(_candidate_span(candidate) - _candidate_span(previous))
+        if line_gap <= line_gap_tolerance and span_gap <= span_group_tolerance:
+            current_group.append(candidate)
+            continue
+        grouped.append(current_group)
+        current_group = [candidate]
+    if current_group:
+        grouped.append(current_group)
+
+    plateaus: list[_SpanPlateau] = []
+    for plateau_candidates in grouped:
+        span_values = [_candidate_span(candidate) for candidate in plateau_candidates]
+        support_values = [_candidate_support_ratio(candidate) for candidate in plateau_candidates]
+        y_values = [candidate.measurement_line_y for candidate in plateau_candidates]
+        max_span = max(span_values)
+        median_span = float(np.median(span_values))
+        median_support = float(np.median(support_values)) if support_values else 0.0
+        line_count = len(plateau_candidates)
+        score = max_span + median_support * 600.0 + min(line_count, 40) * 0.75
+        plateaus.append(
+            _SpanPlateau(
+                max_span_px=max_span,
+                median_span_px=median_span,
+                candidates=plateau_candidates,
+                median_support_ratio=median_support,
+                line_count=line_count,
+                median_y=float(np.median(y_values)),
+                score=score,
+            )
+        )
+    return plateaus
+
+
+def _select_candidate_from_plateau(plateau: _SpanPlateau) -> _LineCandidate:
+    return max(
+        plateau.candidates,
+        key=lambda candidate: (
+            _candidate_support_ratio(candidate),
+            -_candidate_max_gap(candidate),
+            -abs(candidate.measurement_line_y - plateau.median_y),
+            _candidate_span(candidate),
+            _candidate_interval_count(candidate),
+            float(candidate.wire_likeness_score or 0.0),
+        ),
+    )
+
+
+def _select_stable_bundle_plateau(
+    span_ranked: list[_LineCandidate],
+    *,
+    span_tie_tolerance_px: float,
+) -> tuple[_LineCandidate, str | None]:
+    top_span = _candidate_span(span_ranked[0])
+    tie_group = [
+        candidate
+        for candidate in span_ranked
+        if top_span - _candidate_span(candidate) <= span_tie_tolerance_px
+    ]
+    span_tie_selected = max(tie_group, key=_candidate_tie_key)
+    span_window = _stable_plateau_span_window_px(
+        top_span,
+        span_tie_tolerance_px=span_tie_tolerance_px,
+    )
+    high_span_candidates = [
+        candidate
+        for candidate in span_ranked
+        if top_span - _candidate_span(candidate) <= span_window
+    ]
+    plateaus = _span_plateaus(
+        high_span_candidates,
+        span_tie_tolerance_px=span_tie_tolerance_px,
+    )
+    if not plateaus:
+        return span_tie_selected, None
+
+    stable_plateau = max(
+        plateaus,
+        key=lambda plateau: (
+            plateau.score,
+            plateau.max_span_px,
+            plateau.median_support_ratio,
+            plateau.line_count,
+        ),
+    )
+    selected = _select_candidate_from_plateau(stable_plateau)
+    if selected is not span_tie_selected:
+        span_drop = top_span - _candidate_span(selected)
+        if span_drop <= span_tie_tolerance_px:
+            return selected, None
+        if span_drop <= _stable_plateau_near_equal_drop_px(
+            span_tie_tolerance_px
+        ) or span_drop >= _stable_plateau_override_min_drop_px(span_tie_tolerance_px):
+            return selected, "stable_bundle_plateau"
+        return span_tie_selected, None
+    return span_tie_selected, None
+
+
 def _select_best_line_candidate(
     candidates: list[_LineCandidate],
     *,
@@ -1791,14 +1941,12 @@ def _select_best_line_candidate(
     )
     if not prefer_largest_formal_span:
         selected = _best_line_candidate(candidates, prefer_largest_formal_span=False)
+        selected_reason_override = None
     else:
-        top_span = _candidate_span(span_ranked[0])
-        tie_group = [
-            candidate
-            for candidate in span_ranked
-            if top_span - _candidate_span(candidate) <= span_tie_tolerance_px
-        ]
-        selected = max(tie_group, key=_candidate_tie_key)
+        selected, selected_reason_override = _select_stable_bundle_plateau(
+            span_ranked,
+            span_tie_tolerance_px=span_tie_tolerance_px,
+        )
     original_selected_rank = span_ranked.index(selected) + 1
     final_ranked = [
         selected,
@@ -1824,6 +1972,8 @@ def _select_best_line_candidate(
         span_tie_tolerance_px=span_tie_tolerance_px,
         prefer_largest_formal_span=prefer_largest_formal_span,
     )
+    if selected_reason_override is not None:
+        selected_reason = selected_reason_override
     ambiguous = _line_selection_is_ambiguous(
         span_ranked,
         span_tie_tolerance_px=span_tie_tolerance_px,

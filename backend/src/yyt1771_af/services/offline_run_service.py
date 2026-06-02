@@ -375,6 +375,7 @@ class OfflineRunService:
             frame_count=len(session.frame_paths),
             loop=session.loop,
         )
+        session.previous_valid_detection = None
         session.end_of_stream = False
         return self._frame_response_or_error(
             session,
@@ -563,6 +564,7 @@ class OfflineRunService:
                 detection_result,
                 session.previous_valid_detection,
                 max_jump_px=_max_point_jump_px(session),
+                reject_on_jump=True,
             )
         if detection_result.valid:
             session.previous_valid_detection = detection_result

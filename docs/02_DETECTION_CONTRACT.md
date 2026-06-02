@@ -80,7 +80,7 @@ For each candidate measurement line:
 - select A/B from the required interval boundaries;
 - reject the frame if the line contact is caused by ROI cropping or the pattern is not trustworthy.
 
-The selected A/B points should be stable over time. For `wire_strip`, the formal selected line is the current frame's valid line with the largest `formal_ab_span_px`; previous-frame line position must not affect that formal selection in this stage.
+The selected A/B points should be stable over time. For `wire_strip`, the formal selected line is chosen from current-frame valid high-span candidates. A clearly wider, well-supported current-frame plateau wins. A sparse or low-support side-tail plateau may be demoted in favor of a nearby high-span stable bundle plateau, with the wider rejected candidate retained only in diagnostics. Previous-frame line position must not affect that formal selection in this stage.
 
 ## ROI requirement
 
@@ -202,7 +202,7 @@ Important:
 - A/B must be on real wire foreground interval boundaries.
 - A/B must not be gap, background, ROI-boundary, virtual-envelope, or debug-candidate points.
 - A line without enough valid wire interval support is invalid for `wire_strip`.
-- Run detection must choose the current frame's valid candidate line with the largest `formal_ab_span_px`.
+- Run detection must choose from the current frame's valid high-span candidate lines. The largest `formal_ab_span_px` is preferred when its bundle plateau is well supported; if a much larger line is caused by a sparse, low-support side-tail plateau, the detector may select a lower but stable high-span bundle plateau and record the larger candidate in diagnostics.
 - If multiple valid candidate lines have spans within a very small configured
   tolerance, the detector may use deterministic tie-break diagnostics such as
   support ratio, internal gap, interval count, wire-likeness score, and ROI-center
@@ -300,7 +300,19 @@ Quality is not a substitute for status. A result can have low quality and still 
 
 ## Temporal stability
 
-For the current `wire_bundle_envelope` stage, previous-frame information is diagnostics only. It may be recorded as `previous_measurement_line_y`, `line_y_delta_from_previous`, `distance_jump_from_previous`, `point_a_jump_from_previous`, and `point_b_jump_from_previous`, but it must not change the current frame's formal A/B selection.
+For the current `wire_bundle_envelope` stage, previous-frame information must
+not pull the current frame's formal A/B selection to a previous
+`measurement_line_y`, A/B, or distance. It may be recorded as
+`previous_measurement_line_y`, `line_y_delta_from_previous`,
+`distance_jump_from_previous`, `point_a_jump_from_previous`, and
+`point_b_jump_from_previous`.
+
+When a locked run recipe defines `max_point_jump_px`, run/live-offline services
+may use those diagnostics as a quality gate after independent frame detection:
+if the newly selected formal A/B or distance jumps beyond the configured limit
+relative to the previous valid sample, the service may reject that sample with
+`jump_exceeds_limit`, null formal A/B, and null `distance_px`. The rejected
+candidate points may remain in diagnostics only.
 
 Future temporal continuity would require a separate design stage and, at most, a very weak tie-break when candidate `formal_ab_span_px` values differ by a tiny tolerance.
 

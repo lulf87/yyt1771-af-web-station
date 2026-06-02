@@ -182,6 +182,92 @@ def _two_candidate_wire_bundle_frame(
     return image, roi
 
 
+def _wire_bundle_with_sparse_wide_tail_frame() -> tuple[np.ndarray, RotatedRoi]:
+    roi = RotatedRoi(center_x=180.0, center_y=110.0, width=260.0, height=140.0, angle_deg=0.0)
+    y, x = np.indices((220, 380))
+    dx = x.astype(float) - roi.center_x
+    dy = y.astype(float) - roi.center_y
+    stable_intervals = (
+        (-115.0, -110.0),
+        (-81.0, -72.0),
+        (-57.0, -50.0),
+        (-37.0, -10.0),
+        (-7.0, 7.0),
+        (24.0, 31.0),
+    )
+    stable_bundle = np.logical_or.reduce(
+        [(dx >= start) & (dx <= end) for start, end in stable_intervals]
+    ) & (np.abs(dy) <= 45.0)
+    sparse_tail = (dx >= 58.0) & (dx <= 63.0) & (dy >= -2.0) & (dy <= 12.0)
+    image = np.full((220, 380), 230, dtype=np.uint8)
+    image[stable_bundle | sparse_tail] = 30
+    return image, roi
+
+
+def _wire_bundle_with_isolated_near_best_line_frame() -> tuple[np.ndarray, RotatedRoi]:
+    roi = RotatedRoi(center_x=180.0, center_y=110.0, width=260.0, height=140.0, angle_deg=0.0)
+    y, x = np.indices((220, 380))
+    dx = x.astype(float) - roi.center_x
+    dy = y.astype(float) - roi.center_y
+    stable_intervals = (
+        (-60.0, -48.0),
+        (-16.0, 0.0),
+        (40.0, 55.0),
+    )
+    stable_bundle = (
+        np.logical_or.reduce([(dx >= start) & (dx <= end) for start, end in stable_intervals])
+        & (dy >= 8.0)
+        & (dy <= 64.0)
+    )
+    isolated_intervals = (
+        (-61.0, -47.0),
+        (-15.0, -1.0),
+        (43.0, 57.0),
+    )
+    isolated_false_wide = (
+        np.logical_or.reduce([(dx >= start) & (dx <= end) for start, end in isolated_intervals])
+        & (dy >= -3.0)
+        & (dy <= 3.0)
+    )
+    image = np.full((220, 380), 230, dtype=np.uint8)
+    image[stable_bundle | isolated_false_wide] = 30
+    return image, roi
+
+
+def _wire_bundle_with_supported_clearly_wider_plateau_frame() -> tuple[np.ndarray, RotatedRoi]:
+    roi = RotatedRoi(center_x=180.0, center_y=120.0, width=280.0, height=180.0, angle_deg=0.0)
+    y, x = np.indices((260, 420))
+    dx = x.astype(float) - roi.center_x
+    dy = y.astype(float) - roi.center_y
+    wider_intervals = (
+        (-115.0, -108.0),
+        (-79.0, -72.0),
+        (-57.0, -50.0),
+        (-37.0, -10.0),
+        (-7.0, 7.0),
+        (26.0, 32.0),
+    )
+    wider_plateau = (
+        np.logical_or.reduce([(dx >= start) & (dx <= end) for start, end in wider_intervals])
+        & (dy >= -52.0)
+        & (dy <= -20.0)
+    )
+    narrower_intervals = (
+        (-80.0, -65.0),
+        (-50.0, -35.0),
+        (-20.0, 10.0),
+        (25.0, 47.0),
+    )
+    narrower_high_support_plateau = (
+        np.logical_or.reduce([(dx >= start) & (dx <= end) for start, end in narrower_intervals])
+        & (dy >= 8.0)
+        & (dy <= 82.0)
+    )
+    image = np.full((260, 420), 230, dtype=np.uint8)
+    image[wider_plateau | narrower_high_support_plateau] = 30
+    return image, roi
+
+
 def _low_support_wide_bundle_frame() -> tuple[np.ndarray, RotatedRoi]:
     roi = RotatedRoi(center_x=160.0, center_y=110.0, width=220.0, height=140.0, angle_deg=0.0)
     y, x = np.indices((220, 360))
@@ -731,6 +817,108 @@ def test_wire_near_equal_low_quality_candidates_return_ambiguous() -> None:
     assert result.diagnostics.top_candidate_lines is not None
     assert result.diagnostics.message is not None
     assert "ambiguous" in result.diagnostics.message
+
+
+def test_wire_bundle_envelope_prefers_supported_plateau_over_sparse_tail() -> None:
+    detector = WireStripDetector()
+    frame, roi = _wire_bundle_with_sparse_wide_tail_frame()
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.status is DetectionStatus.OK
+    assert result.point_b is not None
+    b_local = _local_coordinates(result.point_b.x, result.point_b.y, roi)
+    assert b_local[0] == pytest.approx(31.0, abs=2.0)
+    assert result.diagnostics.formal_ab_span_px == pytest.approx(146.0, abs=3.0)
+    assert result.diagnostics.selected_line_reason == "stable_bundle_plateau"
+    assert result.diagnostics.top_candidate_lines is not None
+    assert result.diagnostics.top_candidate_lines[0].selected is True
+    assert any(
+        candidate.formal_ab_span_px is not None
+        and candidate.formal_ab_span_px > result.diagnostics.formal_ab_span_px
+        for candidate in result.diagnostics.top_candidate_lines[1:]
+    )
+
+
+def test_wire_bundle_envelope_prefers_continuous_near_best_plateau_over_isolated_line() -> None:
+    detector = WireStripDetector()
+    frame, roi = _wire_bundle_with_isolated_near_best_line_frame()
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.status is DetectionStatus.OK
+    assert result.point_a is not None
+    assert result.point_b is not None
+    assert result.diagnostics.measurement_line_y is not None
+    assert result.diagnostics.measurement_line_y > 15.0
+    assert result.diagnostics.formal_ab_span_px == pytest.approx(115.0, abs=3.0)
+    assert result.diagnostics.selected_line_reason == "stable_bundle_plateau"
+    assert result.diagnostics.top_candidate_lines is not None
+    assert any(
+        candidate.formal_ab_span_px is not None
+        and candidate.formal_ab_span_px > result.diagnostics.formal_ab_span_px
+        for candidate in result.diagnostics.top_candidate_lines[1:]
+    )
+
+
+def test_wire_bundle_envelope_keeps_supported_clearly_wider_plateau() -> None:
+    detector = WireStripDetector()
+    frame, roi = _wire_bundle_with_supported_clearly_wider_plateau_frame()
+
+    result = detector.detect(
+        frame=frame,
+        roi=roi,
+        segmentation=SegmentationParams(
+            polarity="dark_on_light",
+            threshold_mode="fixed",
+            threshold_value=160,
+            close_kernel=1,
+            open_kernel=1,
+            min_component_area_px=20,
+        ),
+        params=WireStripDetectorParams(),
+    )
+
+    assert result.status is DetectionStatus.OK
+    assert result.point_a is not None
+    assert result.point_b is not None
+    assert result.diagnostics.measurement_line_y is not None
+    assert result.diagnostics.measurement_line_y < 0.0
+    assert result.diagnostics.formal_ab_span_px == pytest.approx(147.0, abs=3.0)
+    assert result.diagnostics.selected_line_reason in {
+        "max_formal_ab_span",
+        "span_tie_break_support_ratio",
+    }
+    assert result.diagnostics.top_candidate_lines is not None
+    selected = [
+        candidate for candidate in result.diagnostics.top_candidate_lines if candidate.selected
+    ]
+    assert len(selected) == 1
+    assert selected[0].formal_ab_span_px == pytest.approx(147.0, abs=3.0)
 
 
 def test_wire_bundle_envelope_rejects_nearby_high_contrast_speck_as_b() -> None:

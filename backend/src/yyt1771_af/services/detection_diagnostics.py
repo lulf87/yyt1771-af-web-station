@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from yyt1771_af.core.geometry import euclidean_distance
 from yyt1771_af.core.models import DetectionResult
+from yyt1771_af.core.statuses import DetectionStatus
 
 
 def record_previous_frame_diagnostics(
@@ -9,8 +10,9 @@ def record_previous_frame_diagnostics(
     previous: DetectionResult,
     *,
     max_jump_px: float | None = None,
+    reject_on_jump: bool = False,
 ) -> None:
-    """Attach previous-frame jump metrics for analysis only; never changes formal A/B."""
+    """Attach previous-frame jump metrics and optionally reject excessive jumps."""
     if not detection.valid or not previous.valid:
         return
     if detection.point_a is None or detection.point_b is None:
@@ -53,5 +55,14 @@ def record_previous_frame_diagnostics(
         detection.diagnostics.jump_warning = (
             f"Frame-to-frame jump exceeds configured threshold {max_jump_px:.2f}px."
         )
+        if reject_on_jump:
+            detection.diagnostics.rejected_candidate_point_a = detection.point_a
+            detection.diagnostics.rejected_candidate_point_b = detection.point_b
+            detection.diagnostics.message = detection.diagnostics.jump_warning
+            detection.status = DetectionStatus.JUMP_EXCEEDS_LIMIT
+            detection.valid = False
+            detection.point_a = None
+            detection.point_b = None
+            detection.distance_px = None
     elif max_jump_px is not None:
         detection.diagnostics.is_top_jump_candidate = False

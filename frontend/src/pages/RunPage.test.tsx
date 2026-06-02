@@ -87,6 +87,7 @@ describe("RunPage live offline mode", () => {
     expect(markup).toContain("Frame budget ms");
     expect(markup).toContain("Raw only");
     expect(markup).toContain("Probe point");
-    expect(markup).toContain("ROI crop zoom");
+    expect(markup).not.toContain("ROI crop zoom");
+    expect(markup).not.toContain("ROI crop inspect");
   });
 });

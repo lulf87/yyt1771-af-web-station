@@ -224,4 +224,15 @@ describe("temperature distance live series", () => {
     expect(temperatureDomains.x.min).toBeLessThan(40.01);
     expect(temperatureDomains.x.max).toBeGreaterThan(40.17);
   });
+
+  it("keeps a wider distance-time y domain so tiny distance wobble is not magnified", () => {
+    const samples = [
+      sampleFromOfflineRunFrame(frame({ frameIndex: 1, temperatureC: 40.01, distancePx: 140.1 })),
+      sampleFromOfflineRunFrame(frame({ frameIndex: 2, temperatureC: 40.02, distancePx: 140.3 })),
+    ];
+
+    const timeDomains = distanceTimeDomains(samples);
+
+    expect(timeDomains.y.max - timeDomains.y.min).toBeGreaterThanOrEqual(10);
+  });
 });

@@ -87,8 +87,11 @@ editing them clears the auto-tuned flag.
 ## Phase 5 — Run / Offline Validation
 
 - Run phase (`services/run_service.py`) applies the confirmed recipe verbatim per
-  frame and re-detects the largest valid `formal_ab_span_px`. It never
-  auto-tunes.
+  frame and re-detects current-frame high-span bundle candidates. A much wider
+  sparse side-tail plateau may be demoted to diagnostics-only when a nearby
+  stable bundle plateau has stronger foreground support; this is reported with
+  `selected_line_reason = stable_bundle_plateau`. It never auto-tunes and never
+  uses previous-frame A/B to choose the formal current-frame line.
 - `run_offline_threshold_sweep` (`services/offline_validation_service.py`)
   evaluates a recipe across candidate thresholds and writes
   `threshold_sweep_summary.json` with per-threshold valid ratio, interval stats,

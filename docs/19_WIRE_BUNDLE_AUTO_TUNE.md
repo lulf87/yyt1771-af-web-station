@@ -73,7 +73,13 @@ that cap remains eligible.
 Run, Live Offline Run, and Offline Validation apply the confirmed recipe
 verbatim. They do not auto-tune per frame, do not use the previous
 `measurement_line_y` to choose formal A/B, and do not fall back to the previous
-A/B or distance.
+A/B or distance. Current-frame line selection uses high-span stable bundle
+plateaus: a sparse, low-support side-tail plateau can be demoted in favor of a
+nearby stable plateau, while the wider rejected candidate remains visible in
+`top_candidate_lines` diagnostics. Live Offline Run may still use the confirmed
+`max_point_jump_px` after independent detection as a rejection gate: an
+excessive jump is reported as `jump_exceeds_limit` with null formal A/B and null
+`distance_px`, while the rejected candidate stays diagnostic-only.
 
 ## Diagnostics
 

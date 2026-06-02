@@ -88,7 +88,6 @@ export function RunPage({
   const [liveFrameIntervalMs, setLiveFrameIntervalMs] = useState<number | null>(null);
   const [rawOnly, setRawOnly] = useState(false);
   const [probeMode, setProbeMode] = useState(false);
-  const [cropZoom, setCropZoom] = useState(2);
   const [probeResult, setProbeResult] = useState<PointProbeResponse | null>(null);
   const [temperatureDistanceSamples, setTemperatureDistanceSamples] = useState<
     TemperatureDistanceSample[]
@@ -120,10 +119,6 @@ export function RunPage({
     runMode === "live_offline" ? (liveFrame?.detection ?? null) : (latest?.detection ?? null);
   const activeFrameRef = runMode === "live_offline" ? liveFrameRef : latestFrameRef;
   const activePreviewUrl = runMode === "live_offline" ? liveFrame?.preview_url ?? null : latestPreviewUrl;
-  const liveRoiCropUrl =
-    runMode === "live_offline" && offlineRun !== null && liveFrame !== null
-      ? `/api/offline-run/${offlineRun.session_id}/frame/${liveFrame.frame_index}/roi-crop.png?scale=${cropZoom}`
-      : null;
   const rows = sampleRows(samples).slice(-12).reverse();
   const liveRelativeTimeS =
     runMode === "live_offline" ? (liveFrame?.relative_time_s ?? null) : null;
@@ -569,12 +564,6 @@ export function RunPage({
               roi={measurementDefinition?.roi ?? fallbackRoi}
               showDiagnosticsOverlay={runMode === "live_offline" && !isLivePlaying}
             />
-            {liveRoiCropUrl ? (
-              <section className="roi-crop-panel" aria-label="Live ROI crop inspect">
-                <h2>ROI crop inspect</h2>
-                <img alt="Full resolution live ROI crop" src={liveRoiCropUrl} />
-              </section>
-            ) : null}
           </section>
 
           <TemperatureDistanceChart
@@ -681,18 +670,6 @@ export function RunPage({
                 >
                   Probe point
                 </button>
-                <label className="stacked-field">
-                  <span>ROI crop zoom</span>
-                  <select
-                    disabled={liveFrame === null}
-                    onChange={(event) => setCropZoom(Number(event.currentTarget.value))}
-                    value={cropZoom}
-                  >
-                    <option value={1}>1x</option>
-                    <option value={2}>2x</option>
-                    <option value={4}>4x</option>
-                  </select>
-                </label>
               </div>
             </section>
           ) : null}

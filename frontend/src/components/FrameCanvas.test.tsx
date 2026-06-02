@@ -126,7 +126,7 @@ describe("FrameCanvas", () => {
     expect(markup).not.toContain("point point-b");
   });
 
-  it("marks rejected candidates as debug-only for invalid detections", () => {
+  it("keeps rejected candidate diagnostics hidden unless diagnostics overlay is enabled", () => {
     const invalidDetection: SetupDetectResponse = {
       status: "caliper_contact_on_roi_boundary",
       valid: false,
@@ -148,6 +148,40 @@ describe("FrameCanvas", () => {
         frameRef={frameRef}
         previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
         roi={roi}
+      />,
+    );
+
+    expect(markup).toContain("detection-invalid-banner");
+    expect(markup).not.toContain("rejected-debug-point");
+    expect(markup).not.toContain("REJECTED DEBUG");
+    expect(markup).not.toContain("measurement-line");
+    expect(markup).not.toContain("point point-a");
+    expect(markup).not.toContain("point point-b");
+  });
+
+  it("marks rejected candidates as debug-only when diagnostics overlay is enabled", () => {
+    const invalidDetection: SetupDetectResponse = {
+      status: "caliper_contact_on_roi_boundary",
+      valid: false,
+      point_a: null,
+      point_b: null,
+      distance_px: null,
+      quality: 1,
+      target_family: "balloon_envelope",
+      detector: "balloon_envelope_detector:v1",
+      diagnostics: {
+        rejected_candidate_point_a: { x: 60, y: 110, coordinate_space: "acquisition" },
+        rejected_candidate_point_b: { x: 160, y: 110, coordinate_space: "acquisition" },
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <FrameCanvas
+        detection={invalidDetection}
+        frameRef={frameRef}
+        previewUrl="/api/camera/frame/1/preview.png?max_width=1200"
+        roi={roi}
+        showDiagnosticsOverlay
       />,
     );
 

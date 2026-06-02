@@ -112,11 +112,11 @@ export function FrameCanvas({
         ]
       : [];
   const rejectedA =
-    detection !== null && !detection.valid
+    showDiagnosticsOverlay && detection !== null && !detection.valid
       ? diagnosticPointToCircle(detection.diagnostics.rejected_candidate_point_a)
       : null;
   const rejectedB =
-    detection !== null && !detection.valid
+    showDiagnosticsOverlay && detection !== null && !detection.valid
       ? diagnosticPointToCircle(detection.diagnostics.rejected_candidate_point_b)
       : null;
   const canEdit = interactive && onRoiChange !== undefined;

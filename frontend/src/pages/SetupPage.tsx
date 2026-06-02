@@ -108,7 +108,6 @@ export function SetupPage({
   const [autoTuned, setAutoTuned] = useState(false);
   const [rawOnly, setRawOnly] = useState(false);
   const [probeMode, setProbeMode] = useState(false);
-  const [cropZoom, setCropZoom] = useState(2);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [setupInputRevision, setSetupInputRevision] = useState(0);
@@ -326,7 +325,6 @@ export function SetupPage({
     detection?.debug_overlay_url,
     debugOverlayLayers,
   );
-  const roiCropUrl = scaledUrl(detection?.roi_crop_url, cropZoom);
 
   useEffect(() => {
     if (!hasOpenSource || setupInputRevision === 0) {
@@ -367,12 +365,6 @@ export function SetupPage({
             rawOnly={rawOnly}
             roi={roi}
           />
-          {roiCropUrl ? (
-            <section className="roi-crop-panel" aria-label="ROI crop inspect">
-              <h2>ROI crop inspect</h2>
-              <img alt="Full resolution ROI crop" src={roiCropUrl} />
-            </section>
-          ) : null}
           {debugOverlayUrl ? (
             <section className="debug-overlay-panel" aria-label="Detection debug overlay">
               <h2>Debug mask / component / contour</h2>
@@ -457,18 +449,6 @@ export function SetupPage({
               >
                 Probe point
               </button>
-              <label className="stacked-field">
-                <span>ROI crop zoom</span>
-                <select
-                  disabled={detection?.roi_crop_url == null}
-                  onChange={(event) => setCropZoom(Number(event.currentTarget.value))}
-                  value={cropZoom}
-                >
-                  <option value={1}>1x</option>
-                  <option value={2}>2x</option>
-                  <option value={4}>4x</option>
-                </select>
-              </label>
             </div>
           </section>
 
@@ -622,15 +602,6 @@ function formatNumber(value: number | null): string {
     return "N/A";
   }
   return value.toFixed(2);
-}
-
-function scaledUrl(url: string | null | undefined, scale: number): string | null {
-  if (!url) {
-    return null;
-  }
-  const cleaned = url.replace(/([?&])scale=\d+(&?)/, "$1").replace(/[?&]$/, "");
-  const separator = cleaned.includes("?") ? "&" : "?";
-  return `${cleaned}${separator}scale=${scale}`;
 }
 
 function RecipeSummaryRows({
